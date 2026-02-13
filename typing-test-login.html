@@ -4,12 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Debugging Challenge Login</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap"
-        rel="stylesheet">
+    <title>Typing Test Login</title>
+
+    <link href="assets/fonts/google-fonts.css" rel="stylesheet">
+    <link href="assets/icons/material-icons.css" rel="stylesheet">
+    <link href="assets/icons/fontawesome.css" rel="stylesheet">
     <style>
         :root {
             --bg-dark: #0a0e17;
@@ -428,28 +427,28 @@
         <div class="info-panel">
             <div class="code-deco deco-1">{ }</div>
             <div class="info-content">
-                <span class="badge">v2.0.26 System Active</span>
-                <h1>DEBUG<br>PROTOCOL</h1>
+                <span class="badge">v1.0 Typing System Active</span>
+                <h1>TYPING<br>MASTER</h1>
                 <p class="hero-desc">
-                    Initiate debugging sequence. Analyze logic streams, identify syntax anomalies, and optimize runtime
-                    performance parameters within the designated time window.
+                    Initiate typing sequence. Measure words per minute, accuracy, and consistency within the designated
+                    time window.
                 </p>
 
                 <div class="stats-grid">
                     <div class="stat-item">
-                        <h3>15:00</h3>
+                        <h3>60s</h3>
                         <p>Time Limit</p>
                     </div>
                     <div class="stat-item">
                         <h3>∞</h3>
-                        <p>Possibilities</p>
+                        <p>WPM Target</p>
                     </div>
                     <div class="stat-item">
-                        <h3>Logic</h3>
+                        <h3>Accuracy</h3>
                         <p>Core Focus</p>
                     </div>
                     <div class="stat-item">
-                        <h3>Solo/Team</h3>
+                        <h3>Solo</h3>
                         <p>Unit Type</p>
                     </div>
                 </div>
@@ -459,11 +458,11 @@
         <!-- Login Form Side -->
         <div class="form-panel">
             <div class="form-header">
-                <h2>Access Terminal</h2>
-                <p>Enter credentials to begin simulation</p>
+                <h2>Start Test</h2>
+                <p>Enter details to begin test</p>
             </div>
 
-            <form action="./handle">
+            <form action="./handle-typing">
                 <div class="input-group">
                     <label>UNIT COMMANDER (NAME)</label>
                     <div class="input-wrapper">
@@ -506,7 +505,7 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn-primary">INITIALIZE</button>
+                <button type="submit" class="btn-primary">START TEST</button>
             </form>
         </div>
     </div>
