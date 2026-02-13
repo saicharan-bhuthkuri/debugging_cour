@@ -1,0 +1,128 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+	/* Colors */
+	--bg-dark: #0a0e17;
+	--bg-panel: #111b27;
+	--bg-sidebar: #0d121d;
+	--card-bg: rgba(20, 25, 40, 0.7);
+
+	--primary: #00f3ff;
+	--accent: #00f3ff;
+	--secondary: #bc13fe;
+
+	--text-main: #e2e8f0;
+	--text-muted: #94a3b8;
+
+	--border: rgba(255, 255, 255, 0.08);
+	--input-bg: rgba(0, 0, 0, 0.4);
+
+	--success: #00ff9d;
+	--correct: #00ff9d;
+	--incorrect: #ff0055;
+	--current: rgba(0, 243, 255, 0.2);
+
+	--accent-glow: 0 0 10px rgba(0, 243, 255, 0.4);
+	--glow: 0 0 20px rgba(0, 243, 255, 0.15);
+	--glow-primary: 0 0 20px rgba(0, 243, 255, 0.15);
+
+	/* Dimensions & Units */
+	--header-height: 60px;
+
+	/* Fonts */
+	--font-main: 'Outfit', sans-serif;
+	--font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Global Reset */
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+html,
+body {
+	height: 100%;
+	width: 100%;
+}
+
+body {
+	font-family: var(--font-main);
+	background-color: var(--bg-dark);
+	color: var(--text-main);
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.1);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+/* Common Text Styles */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	color: #fff;
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+a {
+	color: var(--primary);
+	text-decoration: none;
+	transition: color 0.2s;
+}
+
+a:hover {
+	color: #fff;
+	text-shadow: 0 0 8px var(--accent-glow);
+}
+
+button {
+	font-family: var(--font-main);
+	cursor: pointer;
+}
+
+code,
+pre {
+	font-family: var(--font-mono);
+}
+
+/* Global Grid Background Utility */
+.bg-grid {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	z-index: -1;
+	pointer-events: none;
+	background:
+		linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+	background-size: 40px 40px;
+	mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+}

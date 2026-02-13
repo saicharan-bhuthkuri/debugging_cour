@@ -214,10 +214,7 @@
     </header>
 
     <!-- Typing Area -->
-    <div
-        class="typing-area"
-        onclick="document.getElementById('inputField').focus()"
-    >
+    <div class="typing-area" onclick={() => {}}>
         <div class="text-display" id="textDisplay"></div>
         <input
             type="text"
@@ -261,10 +258,6 @@
             </div>
         </div>
 
-        <button
-            class="btn-restart"
-            onclick="window.location.href='./typing-test-login.html'"
-            >Re-Initialize</button
-        >
+        <button class="btn-restart" onclick={() => {}}>Re-Initialize</button>
     </div>
 </div>
