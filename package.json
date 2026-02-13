@@ -1,0 +1,18 @@
+{
+    "name": "debugging_cour",
+    "private": true,
+    "scripts": {
+        "dev": "bun run --hot main.ts & (cd frontend && bun run dev)",
+        "buildf": "cd frontend && bun run build",
+        "start": "bun run ./main.ts"
+    },
+    "devDependencies": {
+        "@types/bun": "latest"
+    },
+    "peerDependencies": {
+        "typescript": "^5"
+    },
+    "dependencies": {
+        "jose": "^6.1.3"
+    }
+}
