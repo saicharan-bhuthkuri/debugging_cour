@@ -1,186 +1,197 @@
 <script lang="ts">
-    // --- CONFIGURATION ---
-    const TIME_LIMIT = 300; // 5 minutes in seconds
+    import { onMount } from "svelte";
 
-    // Complex paragraphs for "Difficult" mode
-    const PARAGRAPHS = [
-        "The asynchronous nature of JavaScript allows for non-blocking I/O operations, which is essential for high-performance web applications. However, handling callbacks can lead to 'callback hell', a situation where callbacks are nested within other callbacks several levels deep. Promises and async/await syntax were introduced to mitigate this issue, providing a cleaner, more readable way to handle asynchronous code logic.",
-        "In object-oriented programming, polymorphism allows objects to be treated as instances of their parent class rather than their actual class. The most common use of polymorphism in OOP occurs when a parent class reference is used to refer to a child class object. This concept is fundamental to building flexible and scalable software architectures, enabling developers to write code that is easier to extend and maintain.",
-        "Cryptographic hash functions are mathematical algorithms that map data of arbitrary size to a bit string of a fixed size. It is a one-way function, that is, a function which is practically infeasible to invert. The only way to recreate the input data from an ideal cryptographic hash function's output is to attempt a brute-force search of possible inputs to see if they produce a match.",
-        "Quantum computing harnesses the phenomena of quantum mechanics to deliver a huge leap forward in computation to solve certain problems. Quantum computers operate on qubits, which can exist in a state of superposition, representing both 0 and 1 simultaneously. This differs fundamentally from classical bits that can only be either 0 or 1 at any given time.",
-        "Normalization is the process of organizing data in a database. This includes creating tables and establishing relationships between those tables according to rules designed both to protect the data and to make the database more flexible by eliminating redundancy and inconsistent dependency. First Normal Form (1NF) sets the very basic rules for an organized database.",
-        "Recursive functions are functions that call themselves. They are useful for solving problems that can be defined in terms of smaller, similar subproblems. However, care must be taken to ensure that the recursion terminates; otherwise, it will lead to a stack overflow error, crashing the program. The base case is the condition under which the recursion stops.",
-        "The Document Object Model (DOM) is a cross-platform and language-independent interface that treats an XML or HTML document as a tree structure wherein each node is an object representing a part of the document. The DOM represents a document with a logical tree. Each branch of the tree ends in a node, and each node contains objects. DOM methods allow programmatic access to the tree.",
-    ];
+    onMount(() => {
+        // --- CONFIGURATION ---
+        const TIME_LIMIT = 300; // 5 minutes in seconds
 
-    // --- STATE ---
-    let timeLeft = TIME_LIMIT;
-    let timer = null;
-    let isRunning = false;
-    let charIndex = 0;
-    let mistakes = 0;
-    let isFocused = false;
-    let currentText = "";
+        // Complex paragraphs for "Difficult" mode
+        const PARAGRAPHS = [
+            "The asynchronous nature of JavaScript allows for non-blocking I/O operations, which is essential for high-performance web applications. However, handling callbacks can lead to 'callback hell', a situation where callbacks are nested within other callbacks several levels deep. Promises and async/await syntax were introduced to mitigate this issue, providing a cleaner, more readable way to handle asynchronous code logic.",
+            "In object-oriented programming, polymorphism allows objects to be treated as instances of their parent class rather than their actual class. The most common use of polymorphism in OOP occurs when a parent class reference is used to refer to a child class object. This concept is fundamental to building flexible and scalable software architectures, enabling developers to write code that is easier to extend and maintain.",
+            "Cryptographic hash functions are mathematical algorithms that map data of arbitrary size to a bit string of a fixed size. It is a one-way function, that is, a function which is practically infeasible to invert. The only way to recreate the input data from an ideal cryptographic hash function's output is to attempt a brute-force search of possible inputs to see if they produce a match.",
+            "Quantum computing harnesses the phenomena of quantum mechanics to deliver a huge leap forward in computation to solve certain problems. Quantum computers operate on qubits, which can exist in a state of superposition, representing both 0 and 1 simultaneously. This differs fundamentally from classical bits that can only be either 0 or 1 at any given time.",
+            "Normalization is the process of organizing data in a database. This includes creating tables and establishing relationships between those tables according to rules designed both to protect the data and to make the database more flexible by eliminating redundancy and inconsistent dependency. First Normal Form (1NF) sets the very basic rules for an organized database.",
+            "Recursive functions are functions that call themselves. They are useful for solving problems that can be defined in terms of smaller, similar subproblems. However, care must be taken to ensure that the recursion terminates; otherwise, it will lead to a stack overflow error, crashing the program. The base case is the condition under which the recursion stops.",
+            "The Document Object Model (DOM) is a cross-platform and language-independent interface that treats an XML or HTML document as a tree structure wherein each node is an object representing a part of the document. The DOM represents a document with a logical tree. Each branch of the tree ends in a node, and each node contains objects. DOM methods allow programmatic access to the tree.",
+        ];
 
-    // --- ELEMENTS ---
-    const textDisplay = document.getElementById("textDisplay");
-    const inputField = document.getElementById("inputField");
-    const timerElement = document.getElementById("timer");
-    const wpmElement = document.getElementById("wpm");
-    const accElement = document.getElementById("accuracy");
-    const focusOverlay = document.getElementById("focusOverlay");
-    const resultModal = document.getElementById("resultModal");
+        // --- STATE ---
+        let timeLeft = TIME_LIMIT;
+        let timer = null;
+        let isRunning = false;
+        let charIndex = 0;
+        let mistakes = 0;
+        let isFocused = false;
+        let currentText = "";
 
-    // --- URL PARAMS ---
-    const urlParams = new URLSearchParams(window.location.search);
-    const username = urlParams.get("name") || "Guest";
-    const branch = urlParams.get("branch") || "UNK";
-    const year = urlParams.get("year") || "?";
+        // --- ELEMENTS ---
+        const textDisplay = document.getElementById("textDisplay");
+        const inputField = document.getElementById("inputField");
+        const timerElement = document.getElementById("timer");
+        const wpmElement = document.getElementById("wpm");
+        const accElement = document.getElementById("accuracy");
+        const focusOverlay = document.getElementById("focusOverlay");
+        const resultModal = document.getElementById("resultModal");
 
-    document.getElementById("displayUsername").innerText = username;
-    document.getElementById("userAvatar").innerText = username
-        .charAt(0)
-        .toUpperCase();
-    document.getElementById("displayBranch").innerText = branch.toUpperCase();
-    document.getElementById("displayYear").innerText = `Lvl ${year}`;
+        // --- URL PARAMS ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const username = urlParams.get("name") || "Guest";
+        const branch = urlParams.get("branch") || "UNK";
+        const year = urlParams.get("year") || "?";
 
-    // --- INITIALIZATION ---
-    function initGame() {
-        // Generate long text by joining random paragraphs
-        let text = "";
-        for (let i = 0; i < 10; i++) {
-            // Generate enough text for 5 mins
-            text +=
-                PARAGRAPHS[Math.floor(Math.random() * PARAGRAPHS.length)] + " ";
-        }
-        currentText = text.trim();
+        document.getElementById("displayUsername").innerText = username;
+        document.getElementById("userAvatar").innerText = username
+            .charAt(0)
+            .toUpperCase();
+        document.getElementById("displayBranch").innerText =
+            branch.toUpperCase();
+        document.getElementById("displayYear").innerText = `Lvl ${year}`;
 
-        // Render text
-        textDisplay.innerHTML = "";
-        currentText.split("").forEach((char) => {
-            let span = document.createElement("span");
-            span.innerText = char;
-            textDisplay.appendChild(span);
-        });
+        // --- INITIALIZATION ---
+        function initGame() {
+            // Generate long text by joining random paragraphs
+            let text = "";
+            for (let i = 0; i < 10; i++) {
+                // Generate enough text for 5 mins
+                text +=
+                    PARAGRAPHS[Math.floor(Math.random() * PARAGRAPHS.length)] +
+                    " ";
+            }
+            currentText = text.trim();
 
-        // Set initial active char
-        textDisplay.querySelectorAll("span")[0].classList.add("active");
+            // Render text
+            textDisplay.innerHTML = "";
+            currentText.split("").forEach((char) => {
+                let span = document.createElement("span");
+                span.innerText = char;
+                textDisplay.appendChild(span);
+            });
 
-        // Event Listeners
-        inputField.addEventListener("input", initTyping);
-        inputField.addEventListener("blur", () => {
-            focusOverlay.classList.remove("hidden");
-            isFocused = false;
-        });
+            // Set initial active char
+            textDisplay.querySelectorAll("span")[0].classList.add("active");
 
-        focusOverlay.addEventListener("click", () => {
-            inputField.focus();
-            focusOverlay.classList.add("hidden");
-            isFocused = true;
-        });
+            // Event Listeners
+            inputField.addEventListener("input", initTyping);
+            inputField.addEventListener("blur", () => {
+                focusOverlay.classList.remove("hidden");
+                isFocused = false;
+            });
 
-        // Focus initially
-        // document.addEventListener('keydown', () => inputField.focus());
-    }
+            focusOverlay.addEventListener("click", () => {
+                inputField.focus();
+                focusOverlay.classList.add("hidden");
+                isFocused = true;
+            });
 
-    function initTyping() {
-        const chars = textDisplay.querySelectorAll("span");
-        let typedChar = inputField.value.split("")[charIndex];
-
-        if (!isRunning && inputField.value.length > 0) {
-            // Start Timer
-            isRunning = true;
-            timer = setInterval(updateTimer, 1000);
+            // Focus initially
+            // document.addEventListener('keydown', () => inputField.focus());
         }
 
-        // Handle backspace or data entry
-        if (inputField.value.length < charIndex) {
-            // Must have backspaced
-            // Not strictly supporting backspace in this simple "stream" implementation
-            // usually, but let's handle it for basic usability
-            if (charIndex > 0) {
-                chars[charIndex].classList.remove("active");
-                charIndex--;
-                chars[charIndex].classList.remove("correct", "incorrect");
+        function initTyping() {
+            const chars = textDisplay.querySelectorAll("span");
+            let typedChar = inputField.value.split("")[charIndex];
+
+            if (!isRunning && inputField.value.length > 0) {
+                // Start Timer
+                isRunning = true;
+                timer = setInterval(updateTimer, 1000);
+            }
+
+            // Handle backspace or data entry
+            if (inputField.value.length < charIndex) {
+                // Must have backspaced
+                // Not strictly supporting backspace in this simple "stream" implementation
+                // usually, but let's handle it for basic usability
+                if (charIndex > 0) {
+                    chars[charIndex].classList.remove("active");
+                    charIndex--;
+                    chars[charIndex].classList.remove("correct", "incorrect");
+                    chars[charIndex].classList.add("active");
+                }
+                // Reset input content to match valid charIndex to prevent desync
+                // Ideally we don't clear value, but for simple matching:
+                return;
+            }
+
+            // If we are here, we typed a character
+            if (typedChar == null) return; // Ghost input check
+
+            if (chars[charIndex].innerText === typedChar) {
+                chars[charIndex].classList.add("correct");
+            } else {
+                mistakes++;
+                chars[charIndex].classList.add("incorrect");
+            }
+
+            chars[charIndex].classList.remove("active");
+            charIndex++;
+
+            if (charIndex < chars.length) {
                 chars[charIndex].classList.add("active");
+
+                // Auto-scroll logic if needed (simple version)
+                if (
+                    chars[charIndex].offsetTop >
+                    textDisplay.clientHeight - 60
+                ) {
+                    // textDisplay.scrollTop += 30; // Manual scroll or just let overflow hide
+                    // Improved scroll:
+                    chars[charIndex].scrollIntoView({
+                        block: "center",
+                        behavior: "smooth",
+                    });
+                }
+            } else {
+                // End of text (unlikely in 5 mins with correct generation, but possible)
+                clearInterval(timer);
+                finishTest();
             }
-            // Reset input content to match valid charIndex to prevent desync
-            // Ideally we don't clear value, but for simple matching:
-            return;
+
+            // Calculate stats
+            let wpm = Math.round(
+                (charIndex - mistakes) / 5 / ((TIME_LIMIT - timeLeft) / 60),
+            );
+            wpm = wpm < 0 || !wpm || wpm === Infinity ? 0 : wpm;
+
+            let accuracy = Math.round(
+                ((charIndex - mistakes) / charIndex) * 100,
+            );
+            accuracy = accuracy < 0 || !accuracy ? 100 : accuracy;
+
+            wpmElement.innerText = wpm;
+            accElement.innerText = accuracy + "%";
         }
 
-        // If we are here, we typed a character
-        if (typedChar == null) return; // Ghost input check
-
-        if (chars[charIndex].innerText === typedChar) {
-            chars[charIndex].classList.add("correct");
-        } else {
-            mistakes++;
-            chars[charIndex].classList.add("incorrect");
-        }
-
-        chars[charIndex].classList.remove("active");
-        charIndex++;
-
-        if (charIndex < chars.length) {
-            chars[charIndex].classList.add("active");
-
-            // Auto-scroll logic if needed (simple version)
-            if (chars[charIndex].offsetTop > textDisplay.clientHeight - 60) {
-                // textDisplay.scrollTop += 30; // Manual scroll or just let overflow hide
-                // Improved scroll:
-                chars[charIndex].scrollIntoView({
-                    block: "center",
-                    behavior: "smooth",
-                });
+        function updateTimer() {
+            if (timeLeft > 0) {
+                timeLeft--;
+                let min = Math.floor(timeLeft / 60);
+                let sec = timeLeft % 60;
+                timerElement.innerText = `${min}:${sec < 10 ? "0" + sec : sec}`;
+            } else {
+                clearInterval(timer);
+                finishTest();
             }
-        } else {
-            // End of text (unlikely in 5 mins with correct generation, but possible)
-            clearInterval(timer);
-            finishTest();
         }
 
-        // Calculate stats
-        let wpm = Math.round(
-            (charIndex - mistakes) / 5 / ((TIME_LIMIT - timeLeft) / 60),
-        );
-        wpm = wpm < 0 || !wpm || wpm === Infinity ? 0 : wpm;
+        function finishTest() {
+            inputField.disabled = true;
+            isRunning = false;
 
-        let accuracy = Math.round(((charIndex - mistakes) / charIndex) * 100);
-        accuracy = accuracy < 0 || !accuracy ? 100 : accuracy;
+            // Final Calcs
+            let wpm = wpmElement.innerText;
+            let acc = accElement.innerText;
 
-        wpmElement.innerText = wpm;
-        accElement.innerText = accuracy + "%";
-    }
+            document.getElementById("finalWpm").innerText = wpm;
+            document.getElementById("finalAcc").innerText = acc;
+            document.getElementById("finalChars").innerText = charIndex;
 
-    function updateTimer() {
-        if (timeLeft > 0) {
-            timeLeft--;
-            let min = Math.floor(timeLeft / 60);
-            let sec = timeLeft % 60;
-            timerElement.innerText = `${min}:${sec < 10 ? "0" + sec : sec}`;
-        } else {
-            clearInterval(timer);
-            finishTest();
+            resultModal.classList.add("show");
         }
-    }
 
-    function finishTest() {
-        inputField.disabled = true;
-        isRunning = false;
-
-        // Final Calcs
-        let wpm = wpmElement.innerText;
-        let acc = accElement.innerText;
-
-        document.getElementById("finalWpm").innerText = wpm;
-        document.getElementById("finalAcc").innerText = acc;
-        document.getElementById("finalChars").innerText = charIndex;
-
-        resultModal.classList.add("show");
-    }
-
-    initGame();
+        initGame();
+    });
 </script>
 
 <div class="container">
