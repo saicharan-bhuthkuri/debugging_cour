@@ -78,12 +78,13 @@
           const res = await api(query, "GET", null, token);
           
           if (res.users) {
-            users = res.users;
-            totalUsers = res.total;
+            // Filter out admins and superadmins from this view (they are managed in /admin/admins)
+            users = res.users.filter((u: any) => u.role !== 'admin' && u.role !== 'superadmin');
+            totalUsers = res.total; // Total might be slightly off if backend count includes admins, but good enough for now
           } else if (Array.isArray(res)) {
               // Fallback for older API shape if needed
-              users = res;
-              totalUsers = res.length;
+              users = res.filter((u: any) => u.role !== 'admin' && u.role !== 'superadmin');
+              totalUsers = users.length;
           } else {
              users = [];
              totalUsers = 0;
@@ -223,7 +224,6 @@
           <option value="all">All Roles</option>
           <option value="member">Member</option>
           <option value="lead">Lead</option>
-          <option value="admin">Admin</option>
        </select>
     </div>
     <div>
@@ -303,7 +303,6 @@
              <select bind:value={newUser.role} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
                  <option value="member">Member</option>
                  <option value="lead">Lead</option>
-                 <option value="admin">Admin</option>
              </select>
          </label>
       </div>
@@ -357,7 +356,6 @@
              <select bind:value={editingUser.role} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
                  <option value="member">Member</option>
                  <option value="lead">Lead</option>
-                 <option value="admin">Admin</option>
              </select>
          </label>
       </div>

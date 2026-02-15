@@ -23,7 +23,7 @@
         const payload = atob(split[1]);
         const user = JSON.parse(payload);
         
-        if (user.role == "admin"){
+        if (user.role == "admin" || user.role == "superadmin"){
           setToken(token);
           goto("/admin/users");
         } else {

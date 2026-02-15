@@ -13,6 +13,7 @@ export async function initDB() {
             branch TEXT,
             college TEXT,
             phone TEXT,
+            password TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`;
 
@@ -22,6 +23,7 @@ export async function initDB() {
             status TEXT DEFAULT 'offline',
             assigned_to INTEGER,
             login_otp TEXT,
+            exam_type TEXT DEFAULT 'debug',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`;
 
@@ -74,6 +76,14 @@ export async function initDB() {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`;
 
+        // Check for default super admin
+        const superAdmins = await db`SELECT * FROM users WHERE role = 'superadmin' LIMIT 1`;
+        if (superAdmins.length === 0) {
+            console.log("Creating default superadmin...");
+            await db`INSERT INTO users (name, role, year, branch, college, phone, password)
+                VALUES ('fayaz', 'superadmin', 0, 'ADMIN', 'ADMIN', '0000000000', 'bankai')`;
+        }
+
     } catch (error) {
         if (error instanceof SQL.SQLiteError) {
             return { error: error.message }
@@ -85,8 +95,8 @@ export async function initDB() {
 
 export async function createUser(user: User) {
     try {
-        await db`INSERT INTO users (name, role, year, branch, college, phone)
-            VALUES (${user.name}, ${user.role}, ${user.year}, ${user.branch}, ${user.college}, ${user.phone})`;
+        await db`INSERT INTO users (name, role, year, branch, college, phone, password)
+            VALUES (${user.name}, ${user.role}, ${user.year}, ${user.branch}, ${user.college}, ${user.phone}, ${user.password})`;
         return {}
     } catch (error) {
         if (error instanceof SQL.SQLiteError) {
@@ -215,7 +225,7 @@ export async function getAllSystems() {
 
 export async function createSystem(data: any) {
     try {
-        await db`INSERT INTO systems (code, status) VALUES (${data.code}, ${data.status})`;
+        await db`INSERT INTO systems (code, status, exam_type) VALUES (${data.code}, ${data.status}, ${data.exam_type})`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
@@ -225,7 +235,8 @@ export async function updateSystem(id: number, data: any) {
         await db`UPDATE systems SET 
             status = COALESCE(${data.status}, status),
             assigned_to = COALESCE(${data.assigned_to}, assigned_to),
-            login_otp = COALESCE(${data.login_otp}, login_otp)
+            login_otp = COALESCE(${data.login_otp}, login_otp),
+            exam_type = COALESCE(${data.exam_type}, exam_type)
             WHERE id = ${id}`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
@@ -235,6 +246,25 @@ export async function deleteSystem(id: number) {
     try {
         await db`DELETE FROM systems WHERE id = ${id}`;
         return {};
+    } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
+}
+
+export async function getSystemByCode(code: string) {
+    try {
+        const systems = await db`SELECT * FROM systems WHERE code = ${code}`;
+        return { system: systems[0] };
+    } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
+}
+
+export async function getSystemById(id: number) {
+    try {
+        const systems = await db`
+            SELECT s.*, u.name as assigned_to_name 
+            FROM systems s 
+            LEFT JOIN users u ON s.assigned_to = u.id
+            WHERE s.id = ${id}
+        `;
+        return { system: systems[0] };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 

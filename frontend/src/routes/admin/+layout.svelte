@@ -5,28 +5,108 @@
   import { fade, fly } from "svelte/transition";
   import "../../app.css";
 
+  import * as ws from "$lib/ws.svelte";
+  import * as adminState from "$lib/admin_state.svelte";
+  import { api } from "$lib/api";
+
   let { children } = $props();
 
   let isAdmin = $state(false);
   let isSidebarCollapsed = $state(false);
   let isMobileMenuOpen = $state(false);
+  let userRole = $state("admin");
 
   onMount(() => {
     const token = localStorage.getItem("login_token");
     const isLoginRoute = page.url.pathname.includes("/admin/login");
 
+    // Restore sidebar state
+    const savedSidebarState = localStorage.getItem("admin_sidebar_collapsed");
+    if (savedSidebarState) {
+        isSidebarCollapsed = savedSidebarState === "true";
+    }
+
     if (!token && !isLoginRoute) {
       goto("/admin/login");
-    } else {
+    } else if (token) {
         isAdmin = true;
+        
+        // Connect to WebSocket
+        ws.connect(token);
+
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            userRole = payload.role || 'admin';
+        } catch (e) {
+            userRole = 'admin';
+        }
     }
-    
-    // Auto-collapse on small screens initially if needed, but let's stick to simple default
+  });
+
+  // Persist sidebar state
+  $effect(() => {
+     if (typeof localStorage !== 'undefined') {
+         localStorage.setItem("admin_sidebar_collapsed", String(isSidebarCollapsed));
+     }
+  });
+  
+  // function to refresh state
+  async function refreshSystems() {
+      try {
+        const token = localStorage.getItem("login_token");
+        if (!token) return;
+        const res = await api("/system", "GET", null, token);
+        if (Array.isArray(res)) adminState.setSystems(res);
+        else if (res.systems) adminState.setSystems(res.systems);
+      } catch (e) { console.error("Sync failed", e); }
+  }
+
+  // Listen for WS updates globally for Admin
+  $effect(() => {
+      // Subscribe if connected
+      if (ws.state.connected && isAdmin) {
+          // Re-fetch to ensure sync on connect/reconnect
+          // We don't have direct access to "fetchSystems" from here easily without duplicating logic or using a store action that fetches.
+          // Ideally admin_state should handle fetching or expose it.
+          // For now let's rely on events, but if an event was missed during disconnect...
+          // We could reload window or triggering a refetch if we moved fetch logic to the store.
+          
+
+          refreshSystems(); // Sync on connect
+          
+          const unsubscribe = ws.subscribe((msg: any) => {
+             // Handle Admin-relevant messages
+             if (msg.type === "admin_count") {
+                 adminState.setAdminCount(msg.count);
+             } else if (msg.type === "system_online") {
+                 const systems = adminState.getSystems();
+                 const existing = systems.find((s: any) => s.id === msg.id);
+                 if (existing) {
+                     adminState.updateSystem(msg.id, { status: "online", ...msg.data }); // Merge new data just in case
+                 } else if (msg.data) {
+                     adminState.addSystem({ ...msg.data, status: "online" });
+                 }
+             } else if (msg.type === "system_offline") {
+                 adminState.updateSystem(msg.id, { status: "offline" });
+             } else if (msg.type === "system_updated") {
+                 // Check if it exists, if not add it (maybe it was just created?) 
+                 // But typically specific create event or refresh handle creation.
+                 // msg.data contains full system object usually
+                 if (msg.data) {
+                    adminState.updateSystem(msg.id, msg.data);
+                 }
+             } else if (msg.type === "system_deleted") {
+                 adminState.removeSystem(msg.id);
+             }
+          });
+          return unsubscribe;
+      }
   });
 
   const logout = () => {
     localStorage.removeItem("login_token");
     localStorage.removeItem("isLoggedin");
+    // Close WS? ws.disconnect()? Not implemented but connection will drop on nav usually
     goto("/admin/login");
   }
 </script>
@@ -92,6 +172,24 @@
              <span class="truncate">User Management</span>
            {/if}
         </a>
+
+        {#if userRole === 'superadmin'}
+        <a href="/admin/admins" 
+           class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent
+           {page.url.pathname.includes('/admin/admins') 
+             ? 'bg-gray-900 text-white shadow-md' 
+             : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:border-gray-200'}
+           {isSidebarCollapsed ? 'justify-center px-2' : ''}"
+           title={isSidebarCollapsed ? "Admin Management" : ""}
+        >
+           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+           </svg>
+           {#if !isSidebarCollapsed}
+             <span class="truncate">Admins</span>
+           {/if}
+        </a>
+        {/if}
 
         <a href="/admin/systems" 
            class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent
@@ -224,6 +322,20 @@
                    </svg>
                    User Management
                 </a>
+
+                {#if userRole === 'superadmin'}
+                <a href="/admin/admins"
+                   onclick={() => isMobileMenuOpen = false}
+                   class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent
+                   {page.url.pathname.includes('/admin/admins') 
+                     ? 'bg-gray-900 text-white shadow-md' 
+                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:border-gray-200'}">
+                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+                   </svg>
+                   Admins
+                </a>
+                {/if}
 
                 <a href="/admin/systems"
                    onclick={() => isMobileMenuOpen = false} 

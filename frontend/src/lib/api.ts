@@ -1,5 +1,9 @@
 
-const API_BASE = "http://localhost:3000";
+let BASE_URL = "http://localhost:3000";
+
+if (typeof window !== "undefined") {
+	BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`;
+}
 
 export async function api(path: string, method: string = "GET", body: any = null, token: string = "") {
 	const headers: Record<string, string> = {
@@ -20,7 +24,10 @@ export async function api(path: string, method: string = "GET", body: any = null
 	}
 
 	try {
-		const res = await fetch(`${API_BASE}${path}`, options);
+		// Remove leading slash if present to avoid double slash
+		const cleanPath = path.startsWith("/") ? path : "/" + path;
+		const res = await fetch(`${BASE_URL}${cleanPath}`, options);
+
 		if (res.status === 204) return null;
 
 		const data = await res.json();

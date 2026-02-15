@@ -6,9 +6,10 @@
   import Table from "$lib/components/admin/Table.svelte";
   import Input from "$lib/components/admin/Input.svelte";
   import CreatableSelect from "$lib/components/admin/CreatableSelect.svelte";
-  import { fade, fly } from "svelte/transition";
+  import { fly } from "svelte/transition";
+  import * as adminState from "$lib/admin_state.svelte";
 
-  let systems = $state<any[]>([]);
+  let systems = $derived(adminState.getSystems());
   let users = $state<any[]>([]);
   let loading = $state(true);
   let error = $state("");
@@ -35,6 +36,8 @@
   let modalCollegeFilter = $state("");
   let modalBranchFilter = $state("");
   let modalSelectedUserString = $state(""); // Holds the selected string from dropdown
+  let selectedExamType = $state("debug");
+
 
   // Derived users for dropdown
   let filteredUserOptions = $derived(
@@ -46,12 +49,16 @@
   );
 
   // System Detail View State
-  let selectedSystem = $state<any>(null);
+  let selectedSystemId = $state<number | null>(null);
+  let selectedSystem = $derived(
+      selectedSystemId ? systems.find(s => s.id === selectedSystemId) : null
+  );
   let isOtpVisible = $state(false);
 
   // Delete State
   let isDeleteModalOpen = $state(false);
   let systemToDelete = $state<any>(null);
+  let forceDelete = $state(false);
 
   // Derived state for filtered systems
   let filteredSystems = $derived(systems.filter(system => {
@@ -77,21 +84,21 @@
           
           const res = await api("/system", "GET", null, token);
           if (Array.isArray(res)) {
-            systems = res;
+            adminState.setSystems(res);
           } else if (res.systems) {
-            systems = res.systems;
+            adminState.setSystems(res.systems);
           } else {
-            systems = [];
+            adminState.setSystems([]);
           }
       } catch (e: any) {
           error = e.message;
           // Mock data for UI development if API fails
-          if (systems.length === 0) {
-             systems = [
+          if (adminState.getSystems().length === 0) {
+             adminState.setSystems([
                  { id: 1, code: "SYS-001", status: "offline", assigned_to: null, login_otp: null },
                  { id: 2, code: "SYS-002", status: "online", assigned_to: 101, assigned_to_name: "John Doe", login_otp: "12345" },
                  { id: 3, code: "SYS-003", status: "booked", assigned_to: 102, assigned_to_name: "Jane Smith", login_otp: "54321" },
-             ];
+             ]);
           }
       } finally {
           loading = false;
@@ -163,16 +170,17 @@
           await api(`/system?id=${assigningSystem.id}`, "PUT", { 
               assigned_to: userId,
               login_otp: otp,
-              status: 'booked'
+              status: 'booked',
+              exam_type: selectedExamType,
           }, token || "");
           
           isAssignModalOpen = false;
           
           // Refresh list and if viewing this system details, refresh that too
           await fetchSystems();
-          if (selectedSystem && selectedSystem.id === assigningSystem.id) {
-            selectedSystem = systems.find(s => s.id === assigningSystem.id);
-          }
+          // Refresh list
+          await fetchSystems();
+          // No need to manually update selectedSystem as it is derived from systems list
       } catch (e: any) {
           alert(`Error assigning system: ${e.message}`);
       } finally {
@@ -185,12 +193,20 @@
           const token = localStorage.getItem("login_token");
           await api(`/system?id=${system.id}`, "PUT", { status: newStatus }, token || "");
           await fetchSystems();
-          // Update details view if open
-          if (selectedSystem && selectedSystem.id === system.id) {
-             selectedSystem = systems.find(s => s.id === system.id);
-          }
+          // Details update automatically via derived state
+
       } catch (e: any) {
           alert(`Error updating status: ${e.message}`);
+      }
+  }
+
+  async function handleTypeChange(system: any, newType: string) {
+      try {
+          const token = localStorage.getItem("login_token");
+          await api(`/system?id=${system.id}`, "PUT", { exam_type: newType }, token || "");
+          await fetchSystems();
+      } catch (e: any) {
+          alert(`Error updating exam type: ${e.message}`);
       }
   }
     
@@ -209,6 +225,7 @@
       }
       modalCollegeFilter = "";
       modalBranchFilter = "";
+      selectedExamType = "debug";
       isAssignModalOpen = true;
   }
 
@@ -219,10 +236,8 @@
           const otp = Math.floor(10000 + Math.random() * 90000).toString();
           await api(`/system?id=${system.id}`, "PUT", { login_otp: otp }, token || "");
           await fetchSystems();
-          // Update details view if open
-          if (selectedSystem && selectedSystem.id === system.id) {
-             selectedSystem = systems.find(s => s.id === system.id);
-          }
+          // Details update automatically via derived state
+
       } catch (e: any) {
           alert(`Error generating OTP: ${e.message}`);
       }
@@ -233,20 +248,30 @@
       isSubmitting = true;
       try {
           const token = localStorage.getItem("login_token");
-          await api(`/system?id=${systemToDelete.id}`, "DELETE", null, token || "");
+          await api(`/system?id=${systemToDelete.id}&force=${forceDelete}`, "DELETE", null, token || "");
           
           isDeleteModalOpen = false;
           systemToDelete = null;
+          forceDelete = false;
           
-          if (selectedSystem && selectedSystem.id === systemToDelete?.id) {
-              selectedSystem = null;
+          if (selectedSystemId === systemToDelete?.id) {
+              selectedSystemId = null;
           }
           await fetchSystems();
       } catch (e: any) {
+          if (e.message && e.message.includes("exam is in progress")) {
+             if (confirm("Exam is in progress! Do you want to FORCE delete?")) {
+                 forceDelete = true;
+                 // Retry immediately? Or let user click button again with force checked.
+                 // Let's just enable the force checkbox in UI or retry recursively? 
+                 // Recursive might be dangerous. Let's just alert and let user check "Force" checkbox which we will add.
+             }
+          }
           alert(`Error deleting system: ${e.message}`);
       } finally {
           isSubmitting = false;
       }
+      await fetchSystems();
   }
 
   function confirmDelete(system: any) {
@@ -255,7 +280,7 @@
   }
     
   function openSystemDetail(system: any) {
-      selectedSystem = system;
+      selectedSystemId = system.id;
       isOtpVisible = false; // Reset visibility when opening details
   }
 
@@ -270,6 +295,12 @@
 {#snippet statusCell(row: any)}
   <span class="text-xs px-2 py-1 rounded-full border uppercase tracking-wider font-mono {statusColors[row.status] || 'bg-gray-100'}">
     {row.status}
+  </span>
+{/snippet}
+
+{#snippet typeCell(row: any)}
+  <span class="text-xs px-2 py-1 rounded-full border uppercase tracking-wider font-mono bg-indigo-50 text-indigo-700 border-indigo-200">
+    {row.exam_type || 'debug'}
   </span>
 {/snippet}
 
@@ -306,7 +337,7 @@
   <div class="flex items-center gap-2">
     <Button 
         variant="secondary" 
-        class="!py-2 !px-4 text-sm font-medium cursor-pointer hover:bg-gray-100 hover:shadow-md transition-all active:scale-95"
+        class="py-2! px-4! text-sm font-medium cursor-pointer hover:bg-gray-100 hover:shadow-md transition-all active:scale-95"
         onclick={() => openSystemDetail(row)}
     >
         Manage
@@ -334,16 +365,16 @@
          <!-- Close on background click (handled by parent click) -->
          <div 
             class="min-h-full w-full p-0 md:p-8"
-            onclick={(e) => { if(e.target === e.currentTarget) selectedSystem = null; }}
+            onclick={(e) => { if(e.target === e.currentTarget) selectedSystemId = null; }}
             role="button"
             tabindex="0"
-            onkeydown={(e) => e.key === 'Escape' && (selectedSystem = null)}
+            onkeydown={(e) => e.key === 'Escape' && (selectedSystemId = null)}
          >
              <div class="max-w-5xl mx-auto bg-white min-h-screen md:min-h-0 md:rounded-2xl shadow-xl border border-gray-200 overflow-hidden relative" onclick={(e) => e.stopPropagation()} role="presentation">
 
                 <!-- Close Button -->
                 <button 
-                    onclick={() => selectedSystem = null}
+                    onclick={() => selectedSystemId = null}
                     aria-label="Close details"
                     class="cursor-pointer absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-full transition-colors z-20"
                 >
@@ -465,6 +496,23 @@
                             </div>
 
                             <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Mode</span>
+                                <div class="grid grid-cols-2 gap-3">
+                                    {#each ['debug', 'typing'] as type}
+                                        <button 
+                                            onclick={() => handleTypeChange(selectedSystem, type)}
+                                            class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
+                                            {selectedSystem.exam_type === type 
+                                                ? 'bg-indigo-900 text-white border-indigo-900 ring-2 ring-offset-2 ring-indigo-900' 
+                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
+                                        >
+                                            {type === 'debug' ? 'Debug Protocol' : 'Typing Master'}
+                                        </button>
+                                    {/each}
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                                 <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Maintenance</span>
                                 <div class="space-y-2">
                                      <button onclick={() => handleGenerateOTP(selectedSystem)} class="cursor-pointer w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg flex items-center gap-3 transition-colors border border-transparent hover:border-red-100">
@@ -535,6 +583,7 @@
         columns={[
           { key: 'code', label: 'System Code' },
           { key: 'status', label: 'Status', render: statusCell },
+          { key: 'exam_type', label: 'Exam Mode', render: typeCell },
           { key: 'assigned_to_name', label: 'Assigned To', render: assignedToCell },
           { key: 'actions', label: 'Actions', render: actionCell }
         ]} 
@@ -612,6 +661,14 @@
                  <p class="mt-1 text-xs text-green-600 font-medium">Selected: {modalSelectedUserString}</p>
              {/if}
          </div>
+
+         <div class="w-full">
+             <span class="text-sm font-medium text-gray-700 block mb-1.5">Exam Type</span>
+             <select bind:value={selectedExamType} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+                 <option value="debug">Debug Protocol (Debugging)</option>
+                 <option value="typing">Typing Master (Typing)</option>
+             </select>
+         </div>
       </div>
 
       <div class="bg-blue-50 p-3 rounded-lg text-sm text-blue-700">
@@ -645,6 +702,10 @@
                 <p class="text-sm text-red-700 mt-1">
                     Are you sure you want to delete system <span class="font-mono font-bold">{systemToDelete?.code}</span>? This action cannot be undone and will remove all associated user assignments.
                 </p>
+                <div class="mt-4 flex items-center gap-2">
+                    <input type="checkbox" id="forceDelete" bind:checked={forceDelete} class="rounded border-gray-300 text-red-600 focus:ring-red-500" />
+                    <label for="forceDelete" class="text-sm text-gray-700 font-medium select-none">Force Delete (Override Exam Status)</label>
+                </div>
             </div>
         </div>
 

@@ -1,6 +1,9 @@
 import os from "os";
+import { extname, join, normalize } from "path";
+import { existsSync, statSync } from "fs";
 import { jwtVerify, SignJWT, type JWTPayload } from "jose";
 import * as db from "./db";
+import { wsManager, type WSData } from "./ws_server";
 
 await db.initDB();
 
@@ -8,20 +11,51 @@ export type WithID<T> = T & { id: number };
 
 export interface User {
     name: string;
-    role: 'member' | 'lead' | 'admin';
+    role: 'member' | 'lead' | 'admin' | 'superadmin';
     year: number;
     branch: string;
     college: string;
     phone: string;
+    password?: string;
 }
 
 const JWT_TOKEN = "miaow_trinity";
 
 const secret = new TextEncoder().encode(JWT_TOKEN);
 
-const server = Bun.serve({
+const ROOT = "./build";
+
+function resolveFile(pathname: string): string | null {
+    let filePath = join(ROOT, pathname);
+
+    if (!existsSync(filePath)) {
+        // try .html (e.g. /admin → /admin.html)
+        if (!extname(filePath)) {
+            const htmlPath = filePath + ".html";
+            if (existsSync(htmlPath)) return htmlPath;
+        }
+        return null;
+    }
+
+    const stat = statSync(filePath);
+
+    if (stat.isDirectory()) {
+        const indexFile = join(filePath, "index.html");
+        if (existsSync(indexFile)) return indexFile;
+        return null;
+    }
+
+    return filePath;
+}
+
+const server = Bun.serve<WSData>({
     hostname: "0.0.0.0",
-    port: 3000,
+    port: process.env.PORT || 3000,
+    websocket: {
+        open: (ws) => wsManager.open(ws),
+        message: (ws, msg) => wsManager.message(ws, msg),
+        close: (ws) => wsManager.close(ws),
+    },
     routes: {
         "/user/fields": {
             OPTIONS: () => Res(null, { status: 204 }),
@@ -75,41 +109,34 @@ const server = Bun.serve({
             }),
 
             DELETE: handler(async req => {
-                await requireAdmin(req);
+                const user = await requireAdmin(req);
+                if (user.role !== "superadmin") throw new HttpError("Forbidden: Super Admin only", 403);
 
                 const url = new URL(req.url);
                 const idParam = url.searchParams.get("id");
 
                 if (idParam !== null) {
                     const id = Number(idParam);
-
-                    if (!Number.isInteger(id))
-                        throw new HttpError("Invalid id", 400);
+                    if (!Number.isInteger(id)) throw new HttpError("Invalid id", 400);
 
                     const { res, error } = await db.deleteUserById(id);
                     if (error) throw new HttpError(error, 500);
 
-                    console.log(res);
-
                     return Res(JSON.stringify({ result: res }), { status: 200 });
                 }
-
-                // If no ID is provided, deleting all users? Probably not safe or intended in original code which just listed users again.
-                // Keeping original behavior but calling newgetAllUsers
                 const result = await db.getAllUsers();
-
-                if (result.error)
-                    throw new HttpError(result.error, 500);
-
+                if (result.error) throw new HttpError(result.error, 500);
                 return Res(JSON.stringify({ result }), { status: 200 });
             }),
 
             POST: handler(async req => {
-                await requireAdmin(req);
+                // ADD NEW ADMIN (Super Admin Only)
+                const user = await requireAdmin(req);
+                if (user.role !== "superadmin") throw new HttpError("Forbidden: Super Admin only", 403);
 
                 const cred = await parseJSON<User>(req);
 
-                if (!(await db.userExists(cred)).error) // ! ensures user doesn't exists
+                if (!(await db.userExists(cred)).error)
                     throw new HttpError("User already exists", 409);
 
                 if ((await db.createUser(cred)).error)
@@ -125,10 +152,15 @@ const server = Bun.serve({
             }),
 
             PUT: handler(async req => {
-                await requireAdmin(req);
+                const user = await requireAdmin(req);
                 const cred = await parseJSON<User & { id: number }>(req);
 
                 if (!cred.id) throw new HttpError("User ID required", 400);
+
+                // Only superadmin can edit role to superadmin/admin?
+                if (cred.role && (cred.role === "admin" || cred.role === "superadmin")) {
+                    if (user.role !== "superadmin") throw new HttpError("Forbidden: Only Super Admin can promote", 403);
+                }
 
                 const { res, error } = await db.updateUser(cred.id, cred);
 
@@ -142,22 +174,103 @@ const server = Bun.serve({
             OPTIONS: () => Res(null, { status: 204 }),
 
             POST: handler(async req => {
-                const cred = await parseJSON<User & { pass?: string }>(req);
+                const body = await parseJSON<any>(req);
 
-                if (cred.name === "fayaz" && cred.pass === "bankai") {
-                    const token = await signJWT(getAdmin as JWTPayload & WithID<User>);
+                // System Login
+                if (body.systemNumber) {
+                    const { system, error } = await db.getSystemByCode(body.systemNumber);
+                    if (error || !system) throw new HttpError("System not found", 404);
+
+                    // If OTP is provided, verify it (Exam Start / Validation)
+                    if (body.otp) {
+                        if (system.login_otp !== body.otp) throw new HttpError("Invalid OTP", 401);
+                    } else {
+                        // Code-only login: Just claiming the system (Online Mode)
+                        // If system is already booked/exam, maybe we should still allow "re-claiming" if the machine restarted?
+                        // Yes, allow login.
+                    }
+
+                    const token = await createToken({ id: system.id, name: system.code, role: "system" });
+
+                    // Trigger Online Status immediately?
+                    // Actually, let frontend connect WS next.
+
                     return Res(JSON.stringify({ result: token }), { status: 200 });
                 }
 
-                const { users, error } = await db.userExists(cred);
-                if (error || !users)
-                    throw new HttpError(error, 409)
+                // User/Admin Login
+                const cred = body as User & { pass?: string };
 
-                const token = await createUserToken(users[0]);
+                if (!cred.name || !cred.pass) throw new HttpError("Invalid credentials", 400);
 
+                // Check DB
+                const { users } = await db.getAllUsers({ limit: 1000, search: cred.name });
+                const user = users?.find(u => u.name === cred.name && u.password === cred.pass);
+
+                if (!user) throw new HttpError("Invalid credentials", 401);
+
+                if (user.role !== 'admin' && user.role !== 'superadmin') throw new HttpError("Forbidden", 403);
+
+                const token = await createUserToken(user);
                 return Res(JSON.stringify({ result: token }));
             }),
         },
+
+        "/system/verify": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                // Endpoint to verify OTP for a logged-in system (Booked -> Exam transition)
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+
+                const body = await parseJSON<any>(req);
+                if (!body.otp) throw new HttpError("OTP Required", 400);
+
+                const { system } = await db.getSystemByCode((payload as any).name);
+                if (!system) throw new HttpError("System invalid", 404);
+
+                if (system.login_otp !== body.otp) throw new HttpError("Invalid OTP", 401);
+
+                return Res(JSON.stringify({ result: "Verified" }), { status: 200 });
+            })
+        },
+
+        "/system/check": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                const body = await parseJSON<any>(req);
+                if (!body.code) throw new HttpError("System code required", 400);
+
+                let { system } = await db.getSystemByCode(body.code);
+
+                if (!system) {
+                    // Auto-register new system
+                    console.log(`Auto-registering new system: ${body.code}`);
+                    const { error } = await db.createSystem({
+                        code: body.code,
+                        status: 'offline', // Will be set online by WS
+                        exam_type: 'debug'
+                    });
+                    if (error) throw new HttpError("Failed to register system", 500);
+                    const res = await db.getSystemByCode(body.code);
+                    system = res.system;
+                }
+
+                if (!system) throw new HttpError("System not found", 404);
+
+                // Return public info relevant for UI
+                return Res(JSON.stringify({
+                    result: {
+                        code: system.code,
+                        status: system.status,
+                        exam_type: system.exam_type,
+                        assigned_to_name: (system as any).assigned_to_name
+                    }
+                }));
+            })
+        },
+
 
         // --- SYSTEMS ---
         "/system": {
@@ -176,24 +289,64 @@ const server = Bun.serve({
                 return Res(JSON.stringify({ result: "Created" }));
             }),
             DELETE: handler(async req => {
-                await requireAdmin(req);
+                const user = await requireAdmin(req);
                 const url = new URL(req.url);
                 const id = Number(url.searchParams.get("id"));
+                const force = url.searchParams.get("force") === "true"; // Add force param support
+
                 if (!id) throw new HttpError("Invalid ID", 400);
+
+                // Check system status if not force
+                if (!force) {
+                    // Get system first (Need getSystemById or filter from all)
+                    const { systems } = await db.getAllSystems();
+                    const system = systems?.find((s: any) => s.id === id);
+                    if (system && (system.status === 'exam' || system.status === 'busy')) {
+                        throw new HttpError("Cannot delete system while exam is in progress", 409);
+                    }
+                }
+
+                if (user.role !== "superadmin" && force) {
+                    throw new HttpError("Forbidden: Only Super Admin can force delete", 403);
+                }
 
                 const { error } = await db.deleteSystem(id);
                 if (error) throw new HttpError(error, 500);
+
+                // Broadcast deletion to all
+                wsManager.broadcastAll({ type: "system_deleted", id });
+                // Also notify context to disconnect
+                wsManager.sendToSystem(id, { type: "unregistered" });
+                wsManager.disconnectSystem(id);
+
                 return Res(JSON.stringify({ result: "Deleted" }));
             }),
             PUT: handler(async req => {
-                await requireAdmin(req);
+                const user = await requireAdmin(req);
                 const url = new URL(req.url);
                 const id = Number(url.searchParams.get("id"));
                 if (!id) throw new HttpError("Invalid ID", 400);
 
                 const data = await parseJSON<any>(req);
+
+                // Normal admin restrictions would go here
+
                 const { error } = await db.updateSystem(id, data);
                 if (error) throw new HttpError(error, 500);
+
+                // Fetch updated system to send full details
+                const { systems } = await db.getAllSystems();
+                const updatedSystem = systems?.find((s: any) => s.id === id);
+
+                // Broadcast to admins
+                wsManager.broadcastAdmins({ type: "system_updated", id, data: updatedSystem });
+
+                // targeted update to system
+                wsManager.sendToSystem(id, {
+                    type: "update",
+                    data: updatedSystem
+                });
+
                 return Res(JSON.stringify({ result: "Updated" }));
             })
         },
@@ -338,24 +491,35 @@ const server = Bun.serve({
         "/": Response.redirect("/login"),
     },
 
-    fetch(req) {
+    async fetch(req, server) {
         const url = new URL(req.url);
 
-        let path = url.pathname;
-
-        const filePath = `./build${path}`;
-
-        const file = Bun.file(filePath);
-
-        if (file.size > 0) {
-            return Res(file);
-        } else {
-            const file = Bun.file(filePath + ".html");
-            console.log(file.size)
-            if (file.size > 0) {
-                return Res(file);
+        // Upgrade to WS
+        if (url.searchParams.has("token")) {
+            const token = url.searchParams.get("token") || "";
+            const { payload, error } = await verifyJWT("Bearer " + token);
+            if (!error && payload) {
+                const wsData: WSData = {
+                    role: payload.role as any,
+                    id: (payload as any).id,
+                    name: (payload as any).name
+                };
+                if (server.upgrade(req, { data: wsData })) {
+                    return;
+                }
             }
         }
+
+        let pathname = url.pathname;
+
+        if (pathname === "/") pathname = "/index.html";
+
+        const file = resolveFile(pathname);
+
+        if (file) {
+            return Res(Bun.file(file));
+        }
+
         return Res("Not Found", { status: 404 });
     }
 });
@@ -396,16 +560,6 @@ async function verifyJWT(barrier: string) {
     }
 }
 
-const getAdmin: WithID<User> = {
-    id: 0,
-    name: "fayaz",
-    role: "admin",
-    year: 3,
-    branch: "AIML",
-    college: "Trinity College of Engineering & Technology",
-    phone: "000"
-}
-
 class HttpError extends Error {
     status: number;
     constructor(message: string, status = 400) {
@@ -440,10 +594,18 @@ async function requireAdmin(req: Request) {
     const { payload, error } = await verifyJWT(auth ?? "");
     if (error) throw new HttpError("Unauthorized", 401);
 
-    if (typeof payload !== "object" || payload.role !== "admin")
+    if (typeof payload !== "object" || (payload.role !== "admin" && payload.role !== "superadmin"))
         throw new HttpError("Forbidden", 403);
 
-    return payload;
+    // Verify user exists in DB (Enforce immediate logout/delete effect)
+    const { users } = await db.getUserById((payload as any).id);
+    if (!users || users.length === 0) throw new HttpError("User no longer exists", 401);
+
+    return users[0] as WithID<User>;
+}
+
+async function createToken(payload: any) {
+    return signJWT(payload);
 }
 
 async function parseJSON<T>(req: Request): Promise<T> {
