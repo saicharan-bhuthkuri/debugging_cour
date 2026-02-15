@@ -2,8 +2,8 @@
     "name": "debugging_cour",
     "private": true,
     "scripts": {
-        "dev": "bun run --hot main.ts & (cd frontend && bun run dev)",
-        "buildf": "cd frontend && bun run build",
+        "dev": "bunx concurrently \"bun run --hot main.ts\" \"bun run --cwd ./frontend dev\"",
+        "buildf": "bun run --cwd ./frontend build",
         "start": "bun run ./main.ts"
     },
     "devDependencies": {
