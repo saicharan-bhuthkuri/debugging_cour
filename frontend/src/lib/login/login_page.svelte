@@ -29,7 +29,11 @@
 
     // Mocked data for Step 2
     let teamName = $state("Team Alpha");
-    let systemStatus = $state("SYSTEM ACTIVE");
+    
+    // Status Options: ONLINE, OFFLINE, BOOKED
+    // We'll toggle or set this based on valid logic, for now default to ONLINE
+    let systemStatus: "ONLINE" | "OFFLINE" | "BOOKED" = $state("ONLINE"); 
+    let errorMessage = $state("");
 
     function handleStep1Submit(e: SubmitEvent) {
         e.preventDefault();
@@ -40,7 +44,24 @@
 
     function handleFinalSubmit(e: SubmitEvent) {
         e.preventDefault();
+        errorMessage = ""; // Reset error
+        
+        // Mock Validation
+        if (otp !== "123456") {
+            errorMessage = "Invalid OTP";
+            return;
+        }
+        
         on_submit({ systemNumber, otp });
+    }
+
+    function getStatusClass(status: string) {
+        switch (status) {
+            case "ONLINE": return "status-online";
+            case "OFFLINE": return "status-offline";
+            case "BOOKED": return "status-booked";
+            default: return "status-active";
+        }
     }
 </script>
 
@@ -114,7 +135,7 @@
                         </div>
                         <div class="status-item">
                             <span class="label">STATUS</span>
-                            <p class="value status-active">{systemStatus}</p>
+                            <p class="value {getStatusClass(systemStatus)}">{systemStatus}</p>
                         </div>
                     </div>
 
@@ -131,6 +152,9 @@
                                     autocomplete="off"
                                 />
                             </div>
+                            {#if errorMessage}
+                                <span class="error-message">{errorMessage}</span>
+                            {/if}
                         </div>
 
                         <button type="submit" class="btn-primary"

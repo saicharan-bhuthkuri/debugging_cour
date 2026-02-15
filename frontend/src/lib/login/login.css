@@ -450,9 +450,31 @@ button.btn-primary:hover {
     color: var(--primary);
 }
 
-.status-active {
+.status-active,
+.status-online {
     color: #00ff9d;
     text-shadow: 0 0 10px rgba(0, 255, 157, 0.4);
+}
+
+.status-offline {
+    color: #ff4d4d;
+    text-shadow: 0 0 10px rgba(255, 77, 77, 0.4);
+}
+
+.status-booked {
+    color: #ffbf00;
+    text-shadow: 0 0 10px rgba(255, 191, 0, 0.4);
+}
+
+.error-message {
+    color: #ff4d4d;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    font-family: 'JetBrains Mono', monospace;
+    animation: fadeIn 0.3s ease-out;
+    display: block;
+    width: 100%;
+    text-align: left;
 }
 
 .step-form {
