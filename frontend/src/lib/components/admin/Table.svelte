@@ -14,8 +14,8 @@
   let { data, columns, keyField = 'id' }: Props<any> = $props();
 </script>
 
-<div class="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
-  <table class="w-full text-left table-auto">
+<div class="overflow-x-auto w-full">
+  <table class="w-full text-left table-auto min-w-[800px]">
     <thead class="bg-gray-50 border-b border-gray-200">
       <tr>
         {#each columns as col}

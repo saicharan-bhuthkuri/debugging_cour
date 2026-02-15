@@ -23,6 +23,16 @@ const server = Bun.serve({
     hostname: "0.0.0.0",
     port: 3000,
     routes: {
+        "/user/fields": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { colleges, branches, error } = await db.getUniqueUserFields();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { colleges, branches } }));
+            })
+        },
+
         "/user": {
             OPTIONS: () => Res(null, { status: 204 }),
 
@@ -46,12 +56,22 @@ const server = Bun.serve({
                     return Res(JSON.stringify({ result: users[0] }), { status: 200 });
                 }
 
-                const { users, error } = await db.getAllUsers();
+                const limit = Number(url.searchParams.get("limit") || 50);
+                const offset = Number(url.searchParams.get("offset") || 0);
+                const college = url.searchParams.get("college") || undefined;
+                const branch = url.searchParams.get("branch") || undefined;
+                const role = url.searchParams.get("role") || undefined;
+                const search = url.searchParams.get("search") || undefined;
 
-                if (error)
-                    throw new HttpError(error, 500);
+                // Support "all" filter by treating it as undefined
+                const safeRole = role === "all" ? undefined : role;
 
-                return Res(JSON.stringify({ result: users }), { status: 200 });
+                const result = await db.getAllUsers({ limit, offset, college, branch, role: safeRole, search });
+
+                if (result.error)
+                    throw new HttpError(result.error, 500);
+
+                return Res(JSON.stringify({ result }), { status: 200 });
             }),
 
             DELETE: handler(async req => {
@@ -74,12 +94,14 @@ const server = Bun.serve({
                     return Res(JSON.stringify({ result: res }), { status: 200 });
                 }
 
-                const { users, error } = await db.getAllUsers();
+                // If no ID is provided, deleting all users? Probably not safe or intended in original code which just listed users again.
+                // Keeping original behavior but calling newgetAllUsers
+                const result = await db.getAllUsers();
 
-                if (error)
-                    throw new HttpError(error, 500);
+                if (result.error)
+                    throw new HttpError(result.error, 500);
 
-                return Res(JSON.stringify({ result: users }), { status: 200 });
+                return Res(JSON.stringify({ result }), { status: 200 });
             }),
 
             POST: handler(async req => {
@@ -101,6 +123,19 @@ const server = Bun.serve({
 
                 return Res(JSON.stringify({ result: token }), { status: 200 });
             }),
+
+            PUT: handler(async req => {
+                await requireAdmin(req);
+                const cred = await parseJSON<User & { id: number }>(req);
+
+                if (!cred.id) throw new HttpError("User ID required", 400);
+
+                const { res, error } = await db.updateUser(cred.id, cred);
+
+                if (error) throw new HttpError(error, 500);
+
+                return Res(JSON.stringify({ result: res }), { status: 200 });
+            }),
         },
 
         "/login": {
@@ -121,6 +156,182 @@ const server = Bun.serve({
                 const token = await createUserToken(users[0]);
 
                 return Res(JSON.stringify({ result: token }));
+            }),
+        },
+
+        // --- SYSTEMS ---
+        "/system": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { systems, error } = await db.getAllSystems();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: systems }));
+            }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const data = await parseJSON<any>(req);
+                const { error } = await db.createSystem(data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Created" }));
+            }),
+            DELETE: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const { error } = await db.deleteSystem(id);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Deleted" }));
+            }),
+            PUT: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const data = await parseJSON<any>(req);
+                const { error } = await db.updateSystem(id, data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Updated" }));
+            })
+        },
+
+        // --- DEBUG QUESTIONS ---
+        "/debug/question": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { questions, error } = await db.getAllDebugQuestions();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: questions }));
+            }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const data = await parseJSON<any>(req);
+                const { error } = await db.createDebugQuestion(data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Created" }));
+            }),
+            PUT: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const data = await parseJSON<any>(req);
+                const { error } = await db.updateDebugQuestion(id, data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Updated" }));
+            }),
+            DELETE: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const { error } = await db.deleteDebugQuestion(id);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Deleted" }));
+            })
+        },
+
+        // --- DEBUG LEVELS ---
+        "/debug/level": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { levels, error } = await db.getAllDebugLevels();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: levels }));
+            }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const data = await parseJSON<any>(req);
+                const { error } = await db.createDebugLevel(data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Created" }));
+            }),
+            PUT: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const data = await parseJSON<any>(req);
+                const { error } = await db.updateDebugLevel(id, data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Updated" }));
+            }),
+            DELETE: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const { error } = await db.deleteDebugLevel(id);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Deleted" }));
+            })
+        },
+
+        // --- TYPING LEVELS ---
+        "/typing/level": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { levels, error } = await db.getAllTypingLevels();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: levels }));
+            }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const data = await parseJSON<any>(req);
+                const { error } = await db.createTypingLevel(data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Created" }));
+            }),
+            PUT: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const data = await parseJSON<any>(req);
+                const { error } = await db.updateTypingLevel(id, data);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Updated" }));
+            }),
+            DELETE: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = Number(url.searchParams.get("id"));
+                if (!id) throw new HttpError("Invalid ID", 400);
+
+                const { error } = await db.deleteTypingLevel(id);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: "Deleted" }));
+            })
+        },
+
+        // --- RESULTS ---
+        "/typing/result": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { results, error } = await db.getTypingResults();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: results }));
+            }),
+        },
+        "/debug/result": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { results, error } = await db.getDebugResults();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: results }));
             }),
         },
 

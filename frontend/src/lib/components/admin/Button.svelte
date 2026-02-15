@@ -19,7 +19,7 @@
     class: customClass = '' 
   } : Props = $props();
 
-  const baseStyles = "px-4 py-2 rounded-lg font-medium transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed";
+  const baseStyles = "cursor-pointer px-4 py-2 rounded-lg font-medium transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed";
   
   const variants = {
     primary: "bg-gray-900 text-white hover:bg-black hover:scale-[1.02] shadow-sm",
