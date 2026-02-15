@@ -1,18 +1,27 @@
 <script lang="ts">
     import LoginPage from "$lib/login/login_page.svelte";
     import { setToken } from "$lib/login/login_state.svelte";
-    import type { User } from "../../models/user";
+    // import type { User } from "../../models/user"; // User type is not strictly matching the login payload anymore
 
     var error = $state("");
 
-    async function onSubmit(user: User) {
+    async function onSubmit(data: { systemNumber: string; otp: string }) {
         try {
+            // TODO: Update backend to handle this new payload
+            // For now, we reuse the existing endpoint but this will likely fail validation
+            // or we mock the success for the frontend demo if backend isn't ready.
+
+            console.log("Login Attempt:", data);
+
+            // Mocking a successful token for demonstration since backend doesn't support this yet
+            // In real scenario: post to /login with systemNumber and otp
+            /*
             const res = await fetch("http://localhost:3000/login", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ user }),
+                body: JSON.stringify({ user: data }), // Backend expects 'user'
             });
             const text = await res.text();
             if (!res.ok) {
@@ -20,8 +29,13 @@
             } else {
                 setToken(text);
             }
+            */
+
+            // TEMPORARY: Just set a dummy token to allow login to proceed
+            setToken("mock-token-for-demo");
         } catch (e) {
             console.log("failed login");
+            error = "Login failed (Network Mock)";
         }
     }
 
@@ -48,11 +62,11 @@
 
 <LoginPage
     left_title={title}
-    left_description="Initiate debugging sequence. Analyze logic streams, identify syntax anomalies, and optimize runtime performance parameters within the designated time window."
+    left_description="Initiate coding sequence. Analyze logic, debug errors, and accurately type working solutions within the given time window."
     left_grid_items={[
         { h2: "15:00", p: "Time Limit" },
-        { h2: "∞", p: "Possibilities" },
-        { h2: "Logic", p: "Core Focus" },
+        { h2: "Debug + Type", p: "Task Mode" },
+        { h2: "Logic & Speed", p: "Core Focus" },
         { h2: "Solo/Team", p: "Unit Type" },
     ]}
     right_title="Access Terminal"

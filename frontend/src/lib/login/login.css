@@ -384,3 +384,77 @@ button.btn-primary:hover {
         padding: 1rem 0;
     }
 }
+
+/* Step 2 Specific Styles */
+.step-2-display {
+    animation: fadeIn 0.5s ease-out;
+}
+
+.system-id-display {
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(0, 243, 255, 0.2);
+    padding-bottom: 1rem;
+}
+
+.system-id-display .label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    letter-spacing: 2px;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.glitch-text {
+    font-size: 3rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: #fff;
+    text-shadow: 2px 2px 0px rgba(0, 243, 255, 0.4);
+    animation: glitch 3s infinite;
+}
+
+@keyframes glitch {
+    0% {
+        text-shadow: 2px 2px 0px rgba(0, 243, 255, 0.4);
+    }
+
+    5% {
+        text-shadow: -2px -2px 0px rgba(188, 19, 254, 0.4);
+    }
+
+    10% {
+        text-shadow: 2px 2px 0px rgba(0, 243, 255, 0.4);
+    }
+
+    100% {
+        text-shadow: 2px 2px 0px rgba(0, 243, 255, 0.4);
+    }
+}
+
+.status-row {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.status-item .label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.status-item .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem;
+    color: var(--primary);
+}
+
+.status-active {
+    color: #00ff9d;
+    text-shadow: 0 0 10px rgba(0, 255, 157, 0.4);
+}
+
+.step-form {
+    animation: slideUp 0.4s ease-out;
+}

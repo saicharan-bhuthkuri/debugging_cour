@@ -1,7 +1,6 @@
 <script lang="ts">
     import type { Snippet } from "svelte";
     import "./login.css";
-    import type { User } from "../../models/user";
 
     interface LoginPageProps {
         left_title: Snippet | string;
@@ -12,7 +11,7 @@
         }[];
         right_title: string;
         right_subtitle: string;
-        on_submit: (user: User) => void;
+        on_submit: (data: { systemNumber: string; otp: string }) => void;
     }
 
     const {
@@ -24,18 +23,24 @@
         on_submit,
     }: LoginPageProps = $props();
 
-    let user = $state<User>({
-        name: "",
-        role: "member",
-        year: 1,
-        branch: "",
-        college: "",
-        phone: "",
-    });
+    let step = $state(1);
+    let systemNumber = $state("");
+    let otp = $state("");
 
-    function handleSubmit(e: SubmitEvent) {
+    // Mocked data for Step 2
+    let teamName = $state("Team Alpha");
+    let systemStatus = $state("SYSTEM ACTIVE");
+
+    function handleStep1Submit(e: SubmitEvent) {
         e.preventDefault();
-        on_submit(user);
+        if (systemNumber.trim()) {
+            step = 2;
+        }
+    }
+
+    function handleFinalSubmit(e: SubmitEvent) {
+        e.preventDefault();
+        on_submit({ systemNumber, otp });
     }
 </script>
 
@@ -75,79 +80,65 @@
                 <p>{right_subtitle}</p>
             </div>
 
-            <form onsubmit={handleSubmit}>
-                <div class="input-group">
-                    <label for="name">UNIT COMMANDER (NAME)</label>
-                    <div class="input-wrapper">
-                        <input
-                            type="text"
-                            name="name"
-                            placeholder="Execute Name..."
-                            bind:value={user.name}
-                            required
-                        />
+            {#if step === 1}
+                <!-- STEP 1: Enter System Number -->
+                <form onsubmit={handleStep1Submit} class="step-form">
+                    <div class="input-group">
+                        <label for="systemNumber">SYSTEM NUMBER</label>
+                        <div class="input-wrapper">
+                            <input
+                                type="text"
+                                name="systemNumber"
+                                placeholder="Enter System Number (e.g., SYS-001)"
+                                bind:value={systemNumber}
+                                required
+                                autocomplete="off"
+                            />
+                        </div>
                     </div>
-                </div>
 
-                <div class="input-group">
-                    <label for="college">AFFILIATION (COLLEGE)</label>
-                    <div class="input-wrapper">
-                        <input
-                            type="text"
-                            name="college"
-                            placeholder="Origin Node..."
-                            bind:value={user.college}
-                            required
-                        />
+                    <button type="submit" class="btn-primary">NEXT >></button>
+                </form>
+            {:else}
+                <!-- STEP 2: Verify & OTP -->
+                <div class="step-2-display">
+                    <div class="system-id-display">
+                        <span class="label">SYSTEM ID</span>
+                        <h1 class="glitch-text">{systemNumber}</h1>
                     </div>
-                </div>
 
-                <div class="input-group">
-                    <label for="year">OPERATIONAL LEVEL (YEAR)</label>
-                    <div class="input-wrapper">
-                        <select name="year" bind:value={user.year} required>
-                            <option value="" disabled selected
-                                >Select Level...</option
-                            >
-                            <option value="1">Level 1 (First Year)</option>
-                            <option value="2">Level 2 (Second Year)</option>
-                            <option value="3">Level 3 (Third Year)</option>
-                            <option value="4">Level 4 (Fourth Year)</option>
-                        </select>
+                    <div class="status-row">
+                        <div class="status-item">
+                            <span class="label">TEAM DESIGNATION</span>
+                            <p class="value">{teamName}</p>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">STATUS</span>
+                            <p class="value status-active">{systemStatus}</p>
+                        </div>
                     </div>
-                </div>
 
-                <div class="input-group">
-                    <label for="branch">SPECIALIZATION (BRANCH)</label>
-                    <div class="input-wrapper">
-                        <input
-                            type="text"
-                            name="branch"
-                            bind:value={user.branch}
-                            placeholder="CSE / ECE / IT..."
-                            required
-                        />
-                    </div>
-                </div>
+                    <form onsubmit={handleFinalSubmit} class="step-form">
+                        <div class="input-group">
+                            <label for="otp">ONE-TIME PASSWORD (OTP)</label>
+                            <div class="input-wrapper">
+                                <input
+                                    type="password"
+                                    name="otp"
+                                    placeholder="Enter OTP..."
+                                    bind:value={otp}
+                                    required
+                                    autocomplete="off"
+                                />
+                            </div>
+                        </div>
 
-                <div class="input-group">
-                    <label for="phone">COMM-LINK (PHONE)</label>
-                    <div class="input-wrapper">
-                        <input
-                            type="tel"
-                            name="phone"
-                            bind:value={user.phone}
-                            placeholder="9876543210"
-                            pattern="[0-9]*"
-                            minlength="10"
-                            maxlength="10"
-                            required
-                        />
-                    </div>
+                        <button type="submit" class="btn-primary"
+                            >INITIALIZE SEQUENCE</button
+                        >
+                    </form>
                 </div>
-
-                <button type="submit" class="btn-primary">INITIALIZE</button>
-            </form>
+            {/if}
         </div>
     </div>
 </div>
