@@ -38,7 +38,7 @@ export async function createUser(user: User) {
     }
 }
 
-export async function getUser(user: User) {
+export async function userExists(user: Partial<User>) {
     try {
         const users = await db`SELECT * FROM users WHERE
             name = ${user.name} AND year = ${user.year}
@@ -65,6 +65,32 @@ export async function getAllUsers() {
             return { error: error.message }
         } else {
             return { error: "unexpected error while getting users" };
+        }
+    }
+}
+
+export async function getUserById(id: number) {
+    try {
+        const users = (await db`SELECT * FROM users WHERE id = ${id}`) as WithID<User>[];
+        return { users };
+    } catch (error) {
+        if (error instanceof SQL.SQLiteError) {
+            return { error: error.message }
+        } else {
+            return { error: "unexpected error while getting users" };
+        }
+    }
+}
+
+export async function deleteUserById(id: number) {
+    try {
+        const res = await db`DELETE FROM users WHERE id = ${id}`
+        return { res }
+    } catch (error) {
+        if (error instanceof SQL.SQLiteError) {
+            return { error: error.message }
+        } else {
+            return { error: "unexpected error while deleting user" }
         }
     }
 }
