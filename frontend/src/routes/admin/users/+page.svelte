@@ -6,7 +6,13 @@
   import Table from "$lib/components/admin/Table.svelte";
   import Input from "$lib/components/admin/Input.svelte";
   import CreatableSelect from "$lib/components/admin/CreatableSelect.svelte";
-
+  import { fly } from "svelte/transition";
+  import * as adminState from "$lib/admin_state.svelte";
+  import * as ws from "$lib/ws.svelte";
+  
+  let systems = $derived(adminState.getSystems());
+  let debugLevels = $state<any[]>([]);
+  let onlineSystems = $derived(systems.filter(s => s.status === 'online'));
   let users = $state<any[]>([]);
   let loading = $state(true);
   let error = $state("");
@@ -36,7 +42,10 @@
       year: 1,
       branch: "",
       college: "",
-      phone: ""
+      phone: "",
+      system_id: null as number | null,
+      exam_type: "debug",
+      level_id: null as number | null
   });
 
   let editingUser = $state({
@@ -140,16 +149,36 @@
       try {
           const token = localStorage.getItem("login_token");
           await api("/user", "POST", newUser, token || "");
+          
           isAddModalOpen = false;
           // Reset form
-          newUser = { name: "", role: "member", year: 1, branch: "", college: "", phone: "" };
+          newUser = { 
+              name: "", role: "member", year: 1, branch: "", college: "", phone: "" ,
+              system_id: null, exam_type: "debug", level_id: null
+          };
           fetchUsers();
           fetchUniqueFields();
       } catch (e: any) {
-          alert(`Error creating user: ${e.message}`);
+          // If the error message indicates a booking failure, we tell the user specifically
+          if (e.message.toLowerCase().includes("booked") || e.message.toLowerCase().includes("disconnected")) {
+             alert(`HOLD ON! ${e.message}`);
+             // Re-fetch systems to refresh the list of available ones
+             const sysRes = await api("/system", "GET", null, localStorage.getItem("login_token") || "");
+             if (Array.isArray(sysRes)) adminState.setSystems(sysRes);
+          } else {
+             alert(`Error creating user: ${e.message}`);
+          }
       } finally {
           isSubmitting = false;
       }
+  }
+
+  async function fetchDebugLevels() {
+      try {
+          const token = localStorage.getItem("login_token");
+          const res = await api("/debug/level", "GET", null, token || "");
+          debugLevels = res || [];
+      } catch (e) { console.error(e); }
   }
 
   function nextPage() {
@@ -169,6 +198,11 @@
   onMount(() => {
       fetchUniqueFields();
       fetchUsers();
+      fetchDebugLevels();
+
+      // Ensure systems are synced via WS
+      const token = localStorage.getItem("login_token");
+      if (token && !ws.state.connected) ws.connect(token);
   });
 
 
@@ -332,6 +366,61 @@
       </div>
 
       <Input label="Phone" bind:value={newUser.phone} placeholder="1234567890" required />
+
+      <div class="pt-4 border-t border-gray-100">
+         <div class="flex items-center gap-2 mb-4">
+             <div class="p-2 bg-indigo-50 rounded-lg">
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 21h6l-.75-4M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                 </svg>
+             </div>
+             <div>
+                 <h4 class="text-sm font-bold text-gray-900 leading-none">Assign System (Optional)</h4>
+                 <p class="text-[11px] text-gray-500 mt-1">Book a machine immediately for this user.</p>
+             </div>
+         </div>
+
+         <div class="grid grid-cols-1 gap-4">
+            <div>
+                <span class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Available Systems</span>
+                <select 
+                    bind:value={newUser.system_id}
+                    class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:border-indigo-600 transition-all shadow-sm"
+                >
+                    <option value={null}>Do not assign now</option>
+                    {#each onlineSystems as s}
+                        <option value={s.id}>{s.code} (Online)</option>
+                    {/each}
+                </select>
+                {#if onlineSystems.length === 0}
+                    <p class="mt-1.5 text-[10px] text-amber-600 font-medium">No online systems available right now.</p>
+                {/if}
+            </div>
+
+            {#if newUser.system_id}
+                <div class="grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-2">
+                    <div>
+                        <span class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Exam Type</span>
+                        <select bind:value={newUser.exam_type} class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none">
+                            <option value="debug">Debug Protocol</option>
+                            <option value="typing">Typing Master</option>
+                        </select>
+                    </div>
+                    {#if newUser.exam_type === 'debug'}
+                    <div>
+                        <span class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Default Level</span>
+                        <select bind:value={newUser.level_id} class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none">
+                            <option value={null}>None</option>
+                            {#each debugLevels as level}
+                                <option value={level.id}>{level.name}</option>
+                            {/each}
+                        </select>
+                    </div>
+                    {/if}
+                </div>
+            {/if}
+         </div>
+      </div>
 
       <div class="pt-4 flex justify-end gap-3">
         <Button variant="secondary" onclick={() => isAddModalOpen = false}>Cancel</Button>

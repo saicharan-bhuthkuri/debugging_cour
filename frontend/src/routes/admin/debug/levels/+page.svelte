@@ -18,6 +18,7 @@
   let newLevel = $state({
       name: "",
       order: 1,
+      duration: 900,
       question_ids: [] as number[]
   });
 
@@ -75,7 +76,7 @@
           const token = localStorage.getItem("login_token");
           await api("/debug/level", "POST", newLevel, token || "");
           isAddModalOpen = false;
-          newLevel = { name: "", order: levels.length + 1, question_ids: [] };
+          newLevel = { name: "", order: levels.length + 1, duration: 900, question_ids: [] };
           fetchLevels();
       } catch (e: any) {
           alert(`Error creating level: ${e.message}`);
@@ -86,7 +87,7 @@
 
   function openEditModal(level: any) {
       // Create a deep copy and ensure question_ids exists
-      editingLevel = { ...level, question_ids: level.question_ids || [] }; 
+      editingLevel = { ...level, question_ids: level.question_ids || [], duration: level.duration || 900 }; 
       isEditModalOpen = true;
   }
 
@@ -137,6 +138,12 @@
       fetchQuestions();
   });
 </script>
+
+{#snippet durationCell(row: any)}
+  <span class="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-semibold font-mono">
+      {Math.floor((row.duration || 900) / 60)}:{((row.duration || 900) % 60).toString().padStart(2, '0')}
+  </span>
+{/snippet}
 
 {#snippet questionCountCell(row: any)}
   <span class="bg-gray-100 text-gray-700 px-2 py-1 rounded-md text-xs font-semibold">
@@ -189,6 +196,7 @@
         columns={[
           { key: 'order', label: 'Order' },
           { key: 'name', label: 'Level Name' },
+          { key: 'duration', label: 'Duration', render: durationCell },
           { key: 'question_count', label: 'Questions', render: questionCountCell },
           { key: 'actions', label: 'Actions', render: actionCell }
         ]} 
@@ -201,6 +209,11 @@
     <form onsubmit={(e) => { e.preventDefault(); handleAddLevel(); }} class="space-y-4">
       <Input label="Level Name" bind:value={newLevel.name} placeholder="e.g. Level 1" required />
       <Input label="Order" type="number" bind:value={newLevel.order} required />
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Duration (seconds)</label>
+        <input type="number" bind:value={newLevel.duration} min="60" step="60" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <p class="text-xs text-gray-500 mt-1">{Math.floor(newLevel.duration / 60)} min {newLevel.duration % 60}s</p>
+      </div>
       
       <div class="space-y-2">
           <div class="block text-sm font-medium text-gray-700">Assign Questions</div>
@@ -240,6 +253,11 @@
         <form onsubmit={(e) => { e.preventDefault(); handleUpdateLevel(); }} class="space-y-4">
         <Input label="Level Name" bind:value={editingLevel.name} required />
         <Input label="Order" type="number" bind:value={editingLevel.order} required />
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Duration (seconds)</label>
+          <input type="number" bind:value={editingLevel.duration} min="60" step="60" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <p class="text-xs text-gray-500 mt-1">{Math.floor((editingLevel.duration || 900) / 60)} min {(editingLevel.duration || 900) % 60}s</p>
+        </div>
         
         <div class="space-y-2">
           <div class="block text-sm font-medium text-gray-700">Assign Questions</div>

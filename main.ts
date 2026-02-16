@@ -130,25 +130,42 @@ const server = Bun.serve<WSData>({
             }),
 
             POST: handler(async req => {
-                // ADD NEW ADMIN (Super Admin Only)
-                const user = await requireAdmin(req);
-                if (user.role !== "superadmin") throw new HttpError("Forbidden: Super Admin only", 403);
+                const admin = await requireAdmin(req);
+                const data = await parseJSON<User & { system_id?: number, exam_type?: string, level_id?: number }>(req);
 
-                const cred = await parseJSON<User>(req);
+                // Check if user exists
+                const existing = await db.userExists(data);
+                if (!existing.error) throw new HttpError("User already exists", 409);
 
-                if (!(await db.userExists(cred)).error)
-                    throw new HttpError("User already exists", 409);
+                // Create user
+                const createRes = await db.createUser(data);
+                if (createRes.error) throw new HttpError("User creation failed: " + createRes.error, 500);
 
-                if ((await db.createUser(cred)).error)
-                    throw new HttpError("User creation failed", 500);
+                const { users } = await db.userExists(data);
+                if (!users || users.length === 0) throw new HttpError("Failed to retrieve created user", 500);
+                const newUser = users[0];
 
-                const { users, error } = await db.userExists(cred);
-                if (error || !users)
-                    throw new HttpError(error, 409)
+                // Optional system assignment
+                if (data.system_id) {
+                    const otp = Math.floor(10000 + Math.random() * 90000).toString();
+                    const assignRes = await db.assignSystemToUserStrict(
+                        data.system_id,
+                        newUser.id,
+                        otp,
+                        data.exam_type || 'debug',
+                        data.level_id || null
+                    );
 
-                const token = await createUserToken(users[0]);
+                    if (assignRes.error) {
+                        // User creation succeeded but system was taken/offline
+                        throw new HttpError("User created successfully, but system assignment failed (Already booked or disconnected). Please refresh available systems list.", 409);
+                    }
 
-                return Res(JSON.stringify({ result: token }), { status: 200 });
+                    // Success: Broadcast system update
+                    await notifySystemUpdate(data.system_id);
+                }
+
+                return Res(JSON.stringify({ result: newUser }), { status: 200 });
             }),
 
             PUT: handler(async req => {
@@ -181,19 +198,36 @@ const server = Bun.serve<WSData>({
                     const { system, error } = await db.getSystemByCode(body.systemNumber);
                     if (error || !system) throw new HttpError("System not found", 404);
 
+                    // 1. Check if trying to restore session with valid token
+                    const auth = req.headers.get("Authorization");
+                    if (auth) {
+                        const { payload } = await verifyJWT(auth);
+                        if (payload && payload.role === 'system' && (payload as any).name === body.systemNumber) {
+                            // Valid session restore
+                            // Ensure it's online in DB if it was offline
+                            if (system.status === 'offline') {
+                                await db.updateSystem(system.id, { status: 'online' });
+                                await notifySystemUpdate(system.id);
+                            }
+                            return Res(JSON.stringify({ result: auth.replace("Bearer ", "") }), { status: 200 });
+                        }
+                    }
+
                     // If OTP is provided, verify it (Exam Start / Validation)
                     if (body.otp) {
                         if (system.login_otp !== body.otp) throw new HttpError("Invalid OTP", 401);
                     } else {
                         // Code-only login: Just claiming the system (Online Mode)
-                        // If system is already booked/exam, maybe we should still allow "re-claiming" if the machine restarted?
-                        // Yes, allow login.
+                        if (system.status !== 'offline') {
+                            throw new HttpError("Duplicate System ID", 409);
+                        }
                     }
 
                     const token = await createToken({ id: system.id, name: system.code, role: "system" });
 
-                    // Trigger Online Status immediately?
-                    // Actually, let frontend connect WS next.
+                    // Lock system immediately to prevent race conditions
+                    await db.updateSystem(system.id, { status: 'online' });
+                    await notifySystemUpdate(system.id);
 
                     return Res(JSON.stringify({ result: token }), { status: 200 });
                 }
@@ -219,7 +253,7 @@ const server = Bun.serve<WSData>({
         "/system/verify": {
             OPTIONS: () => Res(null, { status: 204 }),
             POST: handler(async req => {
-                // Endpoint to verify OTP for a logged-in system (Booked -> Exam transition)
+                // Endpoint to verify OTP for a logged-in system
                 const auth = req.headers.get("Authorization");
                 const { payload } = await verifyJWT(auth ?? "");
                 if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
@@ -233,6 +267,137 @@ const server = Bun.serve<WSData>({
                 if (system.login_otp !== body.otp) throw new HttpError("Invalid OTP", 401);
 
                 return Res(JSON.stringify({ result: "Verified" }), { status: 200 });
+            })
+        },
+
+        "/system/start": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+
+                const { system } = await db.getSystemByCode((payload as any).name);
+                if (!system) throw new HttpError("System invalid", 404);
+
+                // Fetch level duration
+                let levelDuration = 900; // default 15 min
+                if (system.assigned_level_id) {
+                    const { level } = await db.getDebugLevelById(system.assigned_level_id);
+                    if (level && level.duration) levelDuration = level.duration;
+                }
+
+                // Create Exam Session
+                const { id: sessionId, error } = await db.createExamSession({
+                    user_id: system.assigned_to,
+                    system_id: system.id,
+                    exam_mode: system.exam_type
+                });
+
+                if (error) throw new HttpError("Failed to create session", 500);
+
+                // Log Start Event
+                await db.createSystemLog({
+                    exam_session_id: sessionId,
+                    user_id: system.assigned_to,
+                    system_code: system.code,
+                    log_type: "EXAM_START",
+                    data: {
+                        timestamp: new Date().toISOString(),
+                        exam_mode: system.exam_type,
+                        msg: "Exam Started"
+                    }
+                });
+
+                // Update to EXAM mode
+                await db.updateSystem(system.id, { status: 'exam' });
+
+                // Broadcast change
+                await notifySystemUpdate(system.id);
+
+                return Res(JSON.stringify({ result: { message: "Started", sessionId, duration: levelDuration } }), { status: 200 });
+            })
+        },
+
+        "/system/finish": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+
+                const { system } = await db.getSystemByCode((payload as any).name);
+                if (!system) throw new HttpError("System invalid", 404);
+
+                // Generate new OTP
+                const newOtp = Math.floor(10000 + Math.random() * 90000).toString();
+
+                await db.updateSystem(system.id, {
+                    status: 'completed',
+                    login_otp: newOtp
+                });
+
+                // Check if session exists and mark it? (Optional, handled by logs usually but good to close session)
+                // We'll rely on the logs for now or explicit update if session_id passed.
+
+                // Broadcast change
+                await notifySystemUpdate(system.id);
+
+                return Res(JSON.stringify({ result: "Finished" }), { status: 200 });
+            })
+        },
+
+        "/system/reset": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const body = await parseJSON<any>(req);
+                const id = body.id;
+                if (!id) throw new HttpError("System ID required", 400);
+
+                const { system } = await db.getSystemById(id);
+                if (!system) throw new HttpError("System not found", 404);
+
+                if (system.status === 'exam') {
+                    throw new HttpError("Cannot reset system while in EXAM mode", 403);
+                }
+
+                const isConnected = wsManager.isSystemConnected(id);
+                const newStatus = isConnected ? 'online' : 'offline';
+
+                const { error } = await db.resetSystem(id, newStatus);
+                if (error) throw new HttpError(error, 500);
+
+                // Fetch updated
+                await notifySystemUpdate(id);
+
+                return Res(JSON.stringify({ result: "Reset" }), { status: 200 });
+            })
+        },
+
+        "/system/log": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+
+                const body = await parseJSON<any>(req);
+                const { system } = await db.getSystemByCode((payload as any).name);
+                if (!system) throw new HttpError("System invalid", 404);
+
+                // Ideally get session from body or active session?
+                // User said "log every submitted question", assuming body has session_id
+
+                await db.createSystemLog({
+                    exam_session_id: body.session_id || 0,
+                    user_id: system.assigned_to,
+                    system_code: system.code,
+                    log_type: body.type,
+                    data: body.data
+                });
+
+                return Res(JSON.stringify({ result: "Logged" }), { status: 200 });
             })
         },
 
@@ -260,12 +425,21 @@ const server = Bun.serve<WSData>({
                 if (!system) throw new HttpError("System not found", 404);
 
                 // Return public info relevant for UI
+                // Fetch level info if assigned
+                let levelInfo: any = null;
+                if (system.assigned_level_id) {
+                    const { level } = await db.getDebugLevelById(system.assigned_level_id);
+                    if (level) levelInfo = { id: level.id, name: level.name, duration: level.duration || 900 };
+                }
+
                 return Res(JSON.stringify({
                     result: {
                         code: system.code,
                         status: system.status,
                         exam_type: system.exam_type,
-                        assigned_to_name: (system as any).assigned_to_name
+                        assigned_to_name: (system as any).assigned_to_name,
+                        assigned_level_id: system.assigned_level_id,
+                        level: levelInfo
                     }
                 }));
             })
@@ -325,11 +499,16 @@ const server = Bun.serve<WSData>({
                 const user = await requireAdmin(req);
                 const url = new URL(req.url);
                 const id = Number(url.searchParams.get("id"));
+                const force = url.searchParams.get("force") === "true";
                 if (!id) throw new HttpError("Invalid ID", 400);
 
                 const data = await parseJSON<any>(req);
 
-                // Normal admin restrictions would go here
+                // Check current system status
+                const { system: currentSystem } = await db.getSystemById(id);
+                if (currentSystem && currentSystem.status === 'exam' && !force) {
+                    throw new HttpError("System is in EXAM mode. Edits are restricted.", 403);
+                }
 
                 const { error } = await db.updateSystem(id, data);
                 if (error) throw new HttpError(error, 500);
@@ -338,16 +517,52 @@ const server = Bun.serve<WSData>({
                 const { systems } = await db.getAllSystems();
                 const updatedSystem = systems?.find((s: any) => s.id === id);
 
-                // Broadcast to admins
-                wsManager.broadcastAdmins({ type: "system_updated", id, data: updatedSystem });
-
-                // targeted update to system
-                wsManager.sendToSystem(id, {
-                    type: "update",
-                    data: updatedSystem
-                });
+                // Broadcast to admins & system
+                await notifySystemUpdate(id);
 
                 return Res(JSON.stringify({ result: "Updated" }));
+            })
+        },
+
+        "/system/bulk": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const body = await parseJSON<{ ids: number[], data: any }>(req);
+                if (!body.ids || !Array.isArray(body.ids)) throw new HttpError("IDs array required", 400);
+
+                // Server-side exam mode check: filter out systems currently in exam mode
+                const skippedIds: number[] = [];
+                const validIds: number[] = [];
+                for (const id of body.ids) {
+                    const { system } = await db.getSystemById(id);
+                    if (system && system.status === 'exam') {
+                        skippedIds.push(id);
+                    } else {
+                        validIds.push(id);
+                    }
+                }
+
+                if (validIds.length === 0) {
+                    throw new HttpError("All selected systems are in EXAM mode and cannot be updated", 403);
+                }
+
+                const { error, otp } = await db.bulkUpdateSystems(validIds, body.data);
+                if (error) throw new HttpError(error, 500);
+
+                // Broadcast updates to all admins and systems
+                for (const id of validIds) {
+                    await notifySystemUpdate(id);
+                }
+
+                return Res(JSON.stringify({
+                    result: {
+                        message: "Bulk update completed",
+                        skipped: skippedIds,
+                        updated: validIds.length,
+                        otp: otp
+                    }
+                }));
             })
         },
 
@@ -355,7 +570,13 @@ const server = Bun.serve<WSData>({
         "/debug/question": {
             OPTIONS: () => Res(null, { status: 204 }),
             GET: handler(async req => {
-                await requireAdmin(req);
+                // Allow Admin or System
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || (payload.role !== "admin" && payload.role !== "superadmin" && payload.role !== "system")) {
+                    throw new HttpError("Unauthorized", 401);
+                }
+
                 const { questions, error } = await db.getAllDebugQuestions();
                 if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: questions }));
@@ -394,7 +615,13 @@ const server = Bun.serve<WSData>({
         "/debug/level": {
             OPTIONS: () => Res(null, { status: 204 }),
             GET: handler(async req => {
-                await requireAdmin(req);
+                // Allow Admin or System
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || (payload.role !== "admin" && payload.role !== "superadmin" && payload.role !== "system")) {
+                    throw new HttpError("Unauthorized", 401);
+                }
+
                 const { levels, error } = await db.getAllDebugLevels();
                 if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: levels }));
@@ -473,8 +700,7 @@ const server = Bun.serve<WSData>({
             OPTIONS: () => Res(null, { status: 204 }),
             GET: handler(async req => {
                 await requireAdmin(req);
-                const { results, error } = await db.getTypingResults();
-                if (error) throw new HttpError(error, 500);
+                const { results } = await db.getTypingResults();
                 return Res(JSON.stringify({ result: results }));
             }),
         },
@@ -482,8 +708,7 @@ const server = Bun.serve<WSData>({
             OPTIONS: () => Res(null, { status: 204 }),
             GET: handler(async req => {
                 await requireAdmin(req);
-                const { results, error } = await db.getDebugResults();
-                if (error) throw new HttpError(error, 500);
+                const { results } = await db.getDebugResults();
                 return Res(JSON.stringify({ result: results }));
             }),
         },
@@ -565,6 +790,14 @@ class HttpError extends Error {
     constructor(message: string, status = 400) {
         super(message);
         this.status = status;
+    }
+}
+
+async function notifySystemUpdate(id: number) {
+    const { system } = await db.getSystemById(id);
+    if (system) {
+        wsManager.broadcastAdmins({ type: "system_updated", id, data: system });
+        wsManager.sendToSystem(id, { type: "update", data: system });
     }
 }
 

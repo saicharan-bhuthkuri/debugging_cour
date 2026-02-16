@@ -8,6 +8,7 @@
   import CreatableSelect from "$lib/components/admin/CreatableSelect.svelte";
   import { fly } from "svelte/transition";
   import * as adminState from "$lib/admin_state.svelte";
+  import * as ws from "$lib/ws.svelte";
 
   let systems = $derived(adminState.getSystems());
   let users = $state<any[]>([]);
@@ -37,6 +38,8 @@
   let modalBranchFilter = $state("");
   let modalSelectedUserString = $state(""); // Holds the selected string from dropdown
   let selectedExamType = $state("debug");
+  let debugLevels = $state<any[]>([]);
+  let selectedLevelId = $state<number | null>(null);
 
 
   // Derived users for dropdown
@@ -54,11 +57,64 @@
       selectedSystemId ? systems.find(s => s.id === selectedSystemId) : null
   );
   let isOtpVisible = $state(false);
+  let isBulkManageMode = $state(false); // Mode for managing all selected systems at once
+  let lastGeneratedBulkOtp = $state<string | null>(null);
 
   // Delete State
   let isDeleteModalOpen = $state(false);
   let systemToDelete = $state<any>(null);
   let forceDelete = $state(false);
+  
+  // Bulk Actions State
+  let selectedIdsList = $state<number[]>([]);
+  let selectedIdSet = $derived(new Set(selectedIdsList));
+  let bulkData = $state({
+      status: "", // empty means no change
+      exam_type: "debug",
+      assigned_level_id: null as number | null,
+      generate_otp: false
+  });
+
+  // Exam Start Confirmation
+  let isExamConfirmOpen = $state(false);
+  let examConfirmCountdown = $state(0);
+  let pendingStatusChange = $state<{system?: any, status: string, isBulk: boolean} | null>(null);
+  let confirmTimer: any;
+
+  function startExamConfirm(data: {system?: any, status: string, isBulk: boolean}) {
+      pendingStatusChange = data;
+      isExamConfirmOpen = true;
+      examConfirmCountdown = 5;
+      if (confirmTimer) clearInterval(confirmTimer);
+      confirmTimer = setInterval(() => {
+          examConfirmCountdown--;
+          if (examConfirmCountdown <= 0) clearInterval(confirmTimer);
+      }, 1000);
+  }
+
+  async function finalConfirmStatusChange() {
+      if (!pendingStatusChange || examConfirmCountdown > 0) return;
+      
+      const { system, status, isBulk } = pendingStatusChange;
+      isExamConfirmOpen = false;
+      
+      if (isBulk) {
+          handleBulkUpdate({ status });
+      } else {
+          if (system) await executeStatusChange(system, status);
+      }
+      pendingStatusChange = null;
+  }
+
+  async function executeStatusChange(system: any, status: string) {
+      try {
+          const token = localStorage.getItem("login_token");
+          await api(`/system?id=${system.id}`, "PUT", { status }, token || "");
+          await fetchSystems();
+      } catch (e: any) {
+          alert(`Error updating status: ${e.message}`);
+      }
+  }
 
   // Derived state for filtered systems
   let filteredSystems = $derived(systems.filter(system => {
@@ -67,13 +123,102 @@
     const matchesStatus = statusFilter === "all" || system.status === statusFilter;
     return matchesSearch && matchesStatus;
   }));
+
+  function toggleAllSelection() {
+      const selectableSystems = filteredSystems.filter(s => s.status !== 'exam');
+      const allSelected = selectableSystems.length > 0 && selectableSystems.every(s => selectedIdSet.has(s.id));
+      if (allSelected) {
+          const removeSet = new Set(selectableSystems.map(s => s.id));
+          selectedIdsList = selectedIdsList.filter(id => !removeSet.has(id));
+      } else {
+          const current = new Set(selectedIdsList);
+          selectableSystems.forEach(s => current.add(s.id));
+          selectedIdsList = [...current];
+      }
+  }
+
+  function openBulkManage() {
+      if (selectedIdsList.length === 0) return;
+      isBulkManageMode = true;
+      selectedSystemId = null; 
+      isOtpVisible = false;
+      lastGeneratedBulkOtp = null;
+      // Reset bulk data for fresh start
+      bulkData = {
+          status: "",
+          exam_type: "debug",
+          assigned_level_id: null,
+          generate_otp: false
+      };
+  }
+
+  function closeDetailView() {
+      isBulkManageMode = false;
+      selectedSystemId = null;
+      lastGeneratedBulkOtp = null;
+  }
+
+  function toggleSelection(id: number) {
+      if (selectedIdSet.has(id)) {
+          selectedIdsList = selectedIdsList.filter(x => x !== id);
+      } else {
+          selectedIdsList = [...selectedIdsList, id];
+      }
+  }
+
+  async function handleBulkUpdate(dataInput?: any) {
+      if (selectedIdsList.length === 0) return;
+      
+      const data = dataInput || bulkData;
+      
+      // If setting status to 'exam', we need confirm unless already confirmed
+      if (data.status === 'exam' && (!pendingStatusChange || !pendingStatusChange.isBulk)) {
+          startExamConfirm({ status: 'exam', isBulk: true });
+          return;
+      }
+
+      isSubmitting = true;
+      try {
+          const token = localStorage.getItem("login_token");
+          
+          const payload = {
+              ids: [...selectedIdsList],
+              data: {
+                  status: data.status || null,
+                  exam_type: data.exam_type || null,
+                  assigned_level_id: data.assigned_level_id || null,
+                  generate_otp: data.generate_otp || false,
+                  reset: data.reset || false
+              }
+          };
+
+          const res = await api("/system/bulk", "POST", payload, token || "");
+          
+          if (res && res.otp) {
+              lastGeneratedBulkOtp = res.otp;
+              isOtpVisible = true;
+          }
+
+          // Only close if we didn't just generate an OTP
+          if (!res || !res.otp) {
+              closeDetailView();
+          }
+          
+          await fetchSystems();
+      } catch (e: any) {
+          alert("Bulk update failed: " + e.message);
+      } finally {
+          isSubmitting = false;
+      }
+  }
     
   // Status Colors Helper
   const statusColors: any = {
       offline: "bg-gray-100 text-gray-600 border-gray-200",
       online: "bg-green-100 text-green-700 border-green-200",
       booked: "bg-yellow-100 text-yellow-700 border-yellow-200",
-      exam: "bg-purple-100 text-purple-700 border-purple-200"
+      exam: "bg-purple-100 text-purple-700 border-purple-200",
+      completed: "bg-blue-100 text-blue-700 border-blue-200"
   };
 
   async function fetchSystems() {
@@ -149,6 +294,19 @@
       }
   }
 
+  async function fetchDebugLevels() {
+      try {
+          const token = localStorage.getItem("login_token");
+          if (!token) return;
+          const res = await api("/debug/level", "GET", null, token);
+          if (Array.isArray(res)) debugLevels = res;
+          else if (res.levels) debugLevels = res.levels;
+          else debugLevels = [];
+      } catch (e) {
+          console.error("Failed to fetch debug levels", e);
+      }
+  }
+
   async function handleAssignUser() {
       if (!assigningSystem || !modalSelectedUserString) return;
       
@@ -172,6 +330,7 @@
               login_otp: otp,
               status: 'booked',
               exam_type: selectedExamType,
+              assigned_level_id: selectedLevelId,
           }, token || "");
           
           isAssignModalOpen = false;
@@ -188,19 +347,23 @@
       }
   }
 
-  async function handleStatusChange(system: any, newStatus: string) {
-      try {
-          const token = localStorage.getItem("login_token");
-          await api(`/system?id=${system.id}`, "PUT", { status: newStatus }, token || "");
-          await fetchSystems();
-          // Details update automatically via derived state
-
-      } catch (e: any) {
-          alert(`Error updating status: ${e.message}`);
-      }
-  }
+   async function handleStatusChange(system: any, newStatus: string) {
+       if (isBulkManageMode) {
+           handleBulkUpdate({ status: newStatus });
+           return;
+       }
+       if (newStatus === 'exam') {
+           startExamConfirm({ system, status: 'exam', isBulk: false });
+           return;
+       }
+       await executeStatusChange(system, newStatus);
+   }
 
   async function handleTypeChange(system: any, newType: string) {
+      if (isBulkManageMode) {
+          handleBulkUpdate({ exam_type: newType });
+          return;
+      }
       try {
           const token = localStorage.getItem("login_token");
           await api(`/system?id=${system.id}`, "PUT", { exam_type: newType }, token || "");
@@ -226,11 +389,16 @@
       modalCollegeFilter = "";
       modalBranchFilter = "";
       selectedExamType = "debug";
+      selectedLevelId = system.assigned_level_id || (debugLevels.length > 0 ? debugLevels[0].id : null);
       isAssignModalOpen = true;
   }
 
   async function handleGenerateOTP(system: any) {
-      if (!confirm("Generate new OTP for this system?")) return;
+      if (!confirm(`Generate new OTP for ${isBulkManageMode ? selectedIdsList.length + ' systems' : 'this system'}?`)) return;
+      if (isBulkManageMode) {
+          handleBulkUpdate({ generate_otp: true });
+          return;
+      }
       try {
           const token = localStorage.getItem("login_token");
           const otp = Math.floor(10000 + Math.random() * 90000).toString();
@@ -240,6 +408,28 @@
 
       } catch (e: any) {
           alert(`Error generating OTP: ${e.message}`);
+      }
+  }
+
+  async function handleResetSystem(system: any) {
+      if (!isBulkManageMode && system.status === 'exam') {
+          alert("Cannot reset system while an exam is in progress.");
+          return;
+      }
+      if (!confirm(`Are you sure you want to RESET ${isBulkManageMode ? selectedIdsList.length + ' systems' : 'this system'}? This will clear the assigned user, OTP and restore it to online/offline state.`)) return;
+      
+      if (isBulkManageMode) {
+          // Resetting in bulk now uses the 'reset' flag in bulkUpdateSystems
+          handleBulkUpdate({ status: 'online', reset: true });
+          return;
+      }
+
+      try {
+          const token = localStorage.getItem("login_token");
+          await api("/system/reset", "POST", { id: system.id }, token || "");
+          await fetchSystems();
+      } catch (e: any) {
+          alert(`Error resetting system: ${e.message}`);
       }
   }
 
@@ -280,6 +470,7 @@
   }
     
   function openSystemDetail(system: any) {
+      isBulkManageMode = false;
       selectedSystemId = system.id;
       isOtpVisible = false; // Reset visibility when opening details
   }
@@ -288,9 +479,30 @@
       fetchSystems();
       fetchUsers();
       fetchUniqueFields();
+      fetchDebugLevels();
   });
 
 </script>
+
+{#snippet selectionHeader()}
+    <input 
+        type="checkbox" 
+        class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+        checked={filteredSystems.filter(s => s.status !== 'exam').length > 0 && filteredSystems.filter(s => s.status !== 'exam').every(s => selectedIdSet.has(s.id))}
+        onclick={toggleAllSelection}
+        title="Select all (excludes exam systems)"
+    />
+{/snippet}
+
+{#snippet selectionCell(row: any)}
+    <input 
+        type="checkbox" 
+        class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+        checked={selectedIdSet.has(row.id)}
+        onclick={(e) => { e.stopPropagation(); toggleSelection(row.id); }}
+        disabled={row.status === 'exam'}
+    />
+{/snippet}
 
 {#snippet statusCell(row: any)}
   <span class="text-xs px-2 py-1 rounded-full border uppercase tracking-wider font-mono {statusColors[row.status] || 'bg-gray-100'}">
@@ -355,8 +567,7 @@
 {/snippet}
 
 <div class="relative min-h-screen -m-4 md:-m-8">
-  
-  {#if selectedSystem}
+    {#if selectedSystem || isBulkManageMode}
       <!-- Detail View Overlay (Fills content area, not sidebar) -->
       <div 
         class="fixed inset-0 z-50 md:absolute md:z-10 md:inset-0 bg-gray-50/95 backdrop-blur-sm overflow-y-auto md:rounded-xl"
@@ -365,16 +576,16 @@
          <!-- Close on background click (handled by parent click) -->
          <div 
             class="min-h-full w-full p-0 md:p-8"
-            onclick={(e) => { if(e.target === e.currentTarget) selectedSystemId = null; }}
+            onclick={(e) => { if(e.target === e.currentTarget) closeDetailView(); }}
             role="button"
             tabindex="0"
-            onkeydown={(e) => e.key === 'Escape' && (selectedSystemId = null)}
+            onkeydown={(e) => e.key === 'Escape' && closeDetailView()}
          >
              <div class="max-w-5xl mx-auto bg-white min-h-screen md:min-h-0 md:rounded-2xl shadow-xl border border-gray-200 overflow-hidden relative" onclick={(e) => e.stopPropagation()} role="presentation">
 
                 <!-- Close Button -->
                 <button 
-                    onclick={() => selectedSystemId = null}
+                    onclick={closeDetailView}
                     aria-label="Close details"
                     class="cursor-pointer absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-full transition-colors z-20"
                 >
@@ -387,19 +598,25 @@
                 <div class="p-6 md:p-8 border-b border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div>
                         <div class="flex items-center gap-3 mb-1">
-                            <span class="text-sm font-medium text-gray-500 uppercase tracking-widest">System Code</span>
-                            <span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">ID: {selectedSystem.id}</span>
+                            <span class="text-sm font-medium text-gray-500 uppercase tracking-widest">{isBulkManageMode ? 'Bulk Management' : 'System Code'}</span>
+                            {#if !isBulkManageMode}
+                                <span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">ID: {selectedSystem?.id}</span>
+                            {/if}
                         </div>
-                        <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight">{selectedSystem.code}</h1>
+                        <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight">
+                            {isBulkManageMode ? `${selectedIdsList.length} Systems Selected` : selectedSystem?.code}
+                        </h1>
                     </div>
+                    {#if !isBulkManageMode}
                     <div class="flex items-center gap-4">
-                        <div class="px-4 py-2 rounded-lg border flex flex-col items-center bg-white shadow-sm {selectedSystem.status === 'online' ? 'border-green-200 bg-green-50' : selectedSystem.status === 'booked' ? 'border-yellow-200 bg-yellow-50' : 'border-gray-200'}">
+                        <div class="px-4 py-2 rounded-lg border flex flex-col items-center bg-white shadow-sm {selectedSystem?.status === 'online' ? 'border-green-200 bg-green-50' : selectedSystem?.status === 'booked' ? 'border-yellow-200 bg-yellow-50' : 'border-gray-200'}">
                             <span class="text-xs uppercase font-bold text-gray-500">Status</span>
-                            <span class="text-lg font-bold capitalize {selectedSystem.status === 'online' ? 'text-green-700' : selectedSystem.status === 'booked' ? 'text-yellow-700' : 'text-gray-700'}">
-                                {selectedSystem.status}
+                            <span class="text-lg font-bold capitalize {selectedSystem?.status === 'online' ? 'text-green-700' : selectedSystem?.status === 'booked' ? 'text-yellow-700' : 'text-gray-700'}">
+                                {selectedSystem?.status}
                             </span>
                         </div>
                     </div>
+                    {/if}
                 </div>
 
                 <!-- Main Content Grid -->
@@ -407,6 +624,7 @@
                     
                     <!-- Left: User & Login Info -->
                     <div class="p-6 md:p-8 flex flex-col gap-8">
+                        {#if !isBulkManageMode}
                         <div>
                             <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
@@ -414,13 +632,13 @@
                                 </svg>
                                 Assigned User
                             </h3>
-                            {#if selectedSystem.assigned_to_name}
+                            {#if selectedSystem?.assigned_to_name}
                                 <div class="bg-blue-50 rounded-xl p-4 border border-blue-100 flex items-start gap-4 shadow-sm">
                                      <div class="h-12 w-12 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center text-xl font-bold shrink-0 shadow-inner">
-                                        {selectedSystem.assigned_to_name.charAt(0)}
+                                        {selectedSystem?.assigned_to_name.charAt(0)}
                                     </div>
                                     <div class="flex-1">
-                                        <div class="text-lg font-semibold text-gray-900">{selectedSystem.assigned_to_name}</div>
+                                        <div class="text-lg font-semibold text-gray-900">{selectedSystem?.assigned_to_name}</div>
                                         <div class="text-sm text-blue-700 font-medium">Currently Assigned</div>
                                         <div class="mt-3 flex gap-2">
                                             <button 
@@ -439,6 +657,7 @@
                                 </div>
                             {/if}
                         </div>
+                        {/if}
 
                         <div>
                             <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -447,7 +666,35 @@
                                 </svg>
                                 Login Credentials
                             </h3>
-                             {#if selectedSystem.login_otp}
+                             {#if isBulkManageMode}
+                                 <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-6 text-center shadow-inner">
+                                     <div class="h-12 w-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                         </svg>
+                                     </div>
+                                     <div class="text-sm text-indigo-900 font-bold mb-1">Bulk OTP Management</div>
+                                     <div class="text-xs text-indigo-600 mb-4 font-medium uppercase tracking-tight">Generate a single OTP for all selected systems</div>
+                                     
+                                     {#if lastGeneratedBulkOtp}
+                                        <div class="mb-6 p-4 bg-white rounded-lg border-2 border-indigo-200 shadow-sm">
+                                            <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-2">Active Bulk OTP</div>
+                                            <div class="text-3xl font-mono font-black text-gray-900 tracking-[0.3em]">
+                                                {lastGeneratedBulkOtp}
+                                            </div>
+                                        </div>
+                                     {/if}
+
+                                     <Button onclick={() => handleBulkUpdate({ generate_otp: true })} fullWidth>
+                                         <span class="flex items-center gap-2 justify-center">
+                                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                             </svg>
+                                             {lastGeneratedBulkOtp ? 'Regenerate OTP' : 'Generate New OTP'}
+                                         </span>
+                                     </Button>
+                                 </div>
+                             {:else if selectedSystem?.login_otp}
                                 <div class="flex items-center gap-4">
                                     <div class="relative">
                                         <button 
@@ -455,19 +702,35 @@
                                             class="group px-6 py-3 bg-gray-900 rounded-lg text-white font-mono text-2xl tracking-[0.2em] relative overflow-hidden cursor-pointer select-none shadow-lg transform transition-transform hover:scale-105 active:scale-95 w-full md:w-auto"
                                             title={isOtpVisible ? "Hide OTP" : "Show OTP"}
                                         >
-                                            <span class="{isOtpVisible ? 'opacity-100' : 'opacity-0'} transition-opacity duration-200 font-bold">{selectedSystem.login_otp}</span>
+                                            <span class="{isOtpVisible ? 'opacity-100' : 'opacity-0'} transition-opacity duration-200 font-bold">{selectedSystem?.login_otp}</span>
                                             <span class="absolute inset-0 flex items-center justify-center {isOtpVisible ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200 text-gray-500 font-bold">•••••</span>
                                         </button>
                                         <div class="mt-2 text-center text-xs text-gray-500 font-medium uppercase tracking-wide">Click to {isOtpVisible ? 'hide' : 'reveal'}</div>
                                     </div>
-
+                                </div>
+                                <div class="mt-4">
+                                    <Button onclick={() => handleGenerateOTP(selectedSystem)} class="w-full">
+                                        <span class="flex items-center gap-2 justify-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                            </svg>
+                                            Generate New OTP
+                                        </span>
+                                    </Button>
                                 </div>
                             {:else}
                                  <div class="p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm border border-yellow-200">
                                      No active OTP. Assign a user or generate one manually.
                                  </div>
                                  <div class="mt-3">
-                                     <Button variant="secondary" onclick={() => handleGenerateOTP(selectedSystem)}>Generate New OTP</Button>
+                                     <Button onclick={() => handleGenerateOTP(selectedSystem)}>
+                                         <span class="flex items-center gap-2">
+                                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                             </svg>
+                                             Generate New OTP
+                                         </span>
+                                     </Button>
                                  </div>
                             {/if}
                         </div>
@@ -479,30 +742,39 @@
                         
                         <div class="space-y-6">
                             <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Set Status</span>
+                                 <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Set Status</span>
                                 <div class="grid grid-cols-2 gap-3">
-                                    {#each ['offline', 'online', 'booked', 'exam'] as status}
+                                    {#if !isBulkManageMode && selectedSystem?.status === 'completed'}
                                         <button 
-                                            onclick={() => handleStatusChange(selectedSystem, status)}
-                                            class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
-                                            {selectedSystem.status === status 
-                                                ? 'bg-gray-900 text-white border-gray-900 ring-2 ring-offset-2 ring-gray-900' 
-                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
+                                            onclick={() => handleStatusChange(selectedSystem, 'online')}
+                                            class="col-span-2 cursor-pointer px-3 py-3 text-sm font-bold rounded-lg transition-all border shadow-sm bg-green-600 text-white border-green-700 hover:bg-green-700 hover:shadow-lg transform active:scale-95"
                                         >
-                                            {status.charAt(0).toUpperCase() + status.slice(1)}
+                                            RE-ACTIVATE SYSTEM (Make Online)
                                         </button>
-                                    {/each}
+                                    {:else}
+                                        {#each ['online', 'booked', 'exam', 'completed'] as status}
+                                            <button 
+                                                onclick={() => handleStatusChange(selectedSystem, status)}
+                                                class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
+                                                {!isBulkManageMode && selectedSystem?.status === status 
+                                                    ? 'bg-gray-900 text-white border-gray-900 ring-2 ring-offset-2 ring-gray-900' 
+                                                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
+                                            >
+                                                {status.charAt(0).toUpperCase() + status.slice(1)}
+                                            </button>
+                                        {/each}
+                                    {/if}
                                 </div>
                             </div>
 
                             <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Mode</span>
+                                 <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Mode</span>
                                 <div class="grid grid-cols-2 gap-3">
                                     {#each ['debug', 'typing'] as type}
                                         <button 
                                             onclick={() => handleTypeChange(selectedSystem, type)}
                                             class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
-                                            {selectedSystem.exam_type === type 
+                                            {!isBulkManageMode && selectedSystem?.exam_type === type 
                                                 ? 'bg-indigo-900 text-white border-indigo-900 ring-2 ring-offset-2 ring-indigo-900' 
                                                 : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
                                         >
@@ -515,19 +787,32 @@
                             <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                                 <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Maintenance</span>
                                 <div class="space-y-2">
-                                     <button onclick={() => handleGenerateOTP(selectedSystem)} class="cursor-pointer w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg flex items-center gap-3 transition-colors border border-transparent hover:border-red-100">
+                                      <button 
+                                         onclick={() => handleResetSystem(selectedSystem)} 
+                                         disabled={selectedSystem?.status === 'exam'}
+                                         class="cursor-pointer w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-amber-50 hover:text-amber-700 rounded-lg flex items-center gap-3 transition-colors border border-transparent hover:border-amber-100 disabled:opacity-50 disabled:cursor-not-allowed group"
+                                     >
+                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400 group-hover:text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                         </svg>
+                                         Reset System (Clear Assignment)
+                                     </button>
+
+                                     <button onclick={() => handleGenerateOTP(selectedSystem)} class="cursor-pointer w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg flex items-center gap-3 transition-colors border border-transparent hover:border-red-100 group">
                                          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400 group-hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                          </svg>
                                          Force Reset OTP
                                      </button>
 
+                                     {#if !isBulkManageMode}
                                      <button onclick={() => confirmDelete(selectedSystem)} class="cursor-pointer w-full text-left px-4 py-3 text-sm font-bold bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 rounded-lg flex items-center gap-3 transition-colors border border-red-200 hover:border-red-300 shadow-sm mt-4">
                                          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500 group-hover:text-red-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                          </svg>
                                          Delete System
                                      </button>
+                                     {/if}
                                 </div>
                             </div>
                         </div>
@@ -568,6 +853,7 @@
           <option value="online">Online</option>
           <option value="booked">Booked</option>
           <option value="exam">Exam</option>
+          <option value="completed">Completed</option>
        </select>
     </div>
   </div>
@@ -581,6 +867,7 @@
       <Table 
         data={filteredSystems} 
         columns={[
+          { key: 'id' as any, label: '', render: selectionCell, headerRender: selectionHeader },
           { key: 'code', label: 'System Code' },
           { key: 'status', label: 'Status', render: statusCell },
           { key: 'exam_type', label: 'Exam Mode', render: typeCell },
@@ -591,6 +878,108 @@
     </div>
   {/if}
 
+  <!-- Bulk Actions Floating Bar -->
+  {#if selectedIdsList.length > 0}
+    <div 
+        class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-black text-white px-3 py-3 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-white/10 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-6 duration-500 ease-out backdrop-blur-md"
+    >
+        <div class="flex items-center gap-3 pl-3 pr-2">
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-black font-black text-lg shadow-inner">
+                {selectedIdsList.length}
+            </div>
+            <div class="flex flex-col">
+                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 leading-none mb-0.5">Selected</span>
+                <span class="text-sm font-extrabold text-white tracking-tight leading-none italic uppercase">Systems</span>
+            </div>
+        </div>
+
+        <div class="h-10 w-px bg-white/10"></div>
+
+        <div class="flex items-center gap-1.5 pr-1">
+            <Button 
+                variant="secondary" 
+                onclick={openBulkManage} 
+                class="rounded-xl! px-5 h-11 flex items-center gap-2.5 bg-white! text-black! border-none! hover:bg-gray-200! transition-all font-bold group"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover:rotate-45 transition-transform duration-300">
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                </svg>
+                Manage
+            </Button>
+            
+            <button 
+                onclick={() => selectedIdsList = []} 
+                class="hover:bg-white/5 p-3 cursor-pointer rounded-xl transition-all group flex items-center justify-center"
+                title="Clear Selection"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500 group-hover:text-white transition-colors">
+                    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+  {/if}
+
+   <Modal 
+    isOpen={isExamConfirmOpen} 
+    onClose={() => { isExamConfirmOpen = false; pendingStatusChange = null; }} 
+    title="URGENT: Start Exam Mode?"
+  >
+    <div class="space-y-6">
+        <div class="p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-900 rounded-r-lg">
+            <div class="flex items-center gap-3 mb-2 font-bold text-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                CRITICAL WARNING
+            </div>
+            <p class="text-sm font-medium leading-relaxed">
+                You are about to force {pendingStatusChange?.isBulk ? selectedIdsList.length : 'this'} system into <strong>EXAM MODE</strong>. 
+                This will bypass the OTP requirement and start the timer <strong>INSTANTLY</strong>.
+                The candidate will be logged in automatically and the exam protocol will begin.
+            </p>
+        </div>
+
+        <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 text-center">
+            <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Target</div>
+            <div class="text-xl font-black text-gray-900">
+                {#if pendingStatusChange?.isBulk}
+                    {selectedIdsList.length} Selected Systems
+                {:else if pendingStatusChange?.system}
+                    System {pendingStatusChange.system.code}
+                {/if}
+            </div>
+        </div>
+
+        <div class="pt-4 flex flex-col gap-3">
+            <button 
+                onclick={finalConfirmStatusChange}
+                disabled={examConfirmCountdown > 0}
+                class="w-full py-4 rounded-xl font-black text-lg transition-all shadow-lg flex items-center justify-center gap-2
+                {examConfirmCountdown > 0 
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed border-b-4 border-gray-300' 
+                  : 'bg-red-600 text-white hover:bg-red-700 active:scale-95 border-b-4 border-red-800'}"
+            >
+                {#if examConfirmCountdown > 0}
+                    CONFIRM IN {examConfirmCountdown}s...
+                {:else}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    START EXAM NOW
+                {/if}
+            </button>
+            <button 
+                onclick={() => { isExamConfirmOpen = false; pendingStatusChange = null; }}
+                class="w-full py-3 text-sm font-bold text-gray-500 hover:text-gray-900 transition-colors"
+            >
+                Cancel and Go Back
+            </button>
+        </div>
+    </div>
+  </Modal>
+
   <!-- Add System Modal -->
   <Modal 
     isOpen={isAddModalOpen} 
@@ -599,16 +988,6 @@
   >
     <form onsubmit={(e) => { e.preventDefault(); handleAddSystem(); }} class="space-y-4">
       <Input label="System Code" bind:value={newSystem.code} placeholder="SYS-001" required />
-      
-      <div class="w-full">
-         <label class="flex flex-col gap-1.5 w-full">
-             <span class="text-sm font-medium text-gray-700">Initial Status</span>
-             <select bind:value={newSystem.status} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
-                 <option value="offline">Offline</option>
-                 <option value="online">Online</option>
-             </select>
-         </label>
-      </div>
 
       <div class="pt-4 flex justify-end gap-3">
         <Button variant="secondary" onclick={() => isAddModalOpen = false}>Cancel</Button>
@@ -669,6 +1048,21 @@
                  <option value="typing">Typing Master (Typing)</option>
              </select>
          </div>
+
+         {#if selectedExamType === 'debug'}
+         <div class="w-full">
+             <span class="text-sm font-medium text-gray-700 block mb-1.5">Assign Level <span class="text-red-500">*</span></span>
+             <select bind:value={selectedLevelId} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" required>
+                 <option value={null} disabled>Select a level...</option>
+                 {#each debugLevels.sort((a, b) => (a.order_num || a.order || 0) - (b.order_num || b.order || 0)) as level}
+                     <option value={level.id}>{level.name} ({Math.floor((level.duration || 900) / 60)} min, {level.question_ids?.length || 0} questions)</option>
+                 {/each}
+             </select>
+             {#if debugLevels.length === 0}
+                 <p class="text-xs text-amber-600 mt-1">No levels found. Create levels in Debug > Levels first.</p>
+             {/if}
+         </div>
+         {/if}
       </div>
 
       <div class="bg-blue-50 p-3 rounded-lg text-sm text-blue-700">

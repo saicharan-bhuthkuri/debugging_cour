@@ -14,6 +14,8 @@
         system_status?: "ONLINE" | "OFFLINE" | "BOOKED";
         assigned_user?: string | null;
         exam_type?: string;
+        systemNumber?: string;
+        on_logout?: () => void;
     }
 
     const {
@@ -26,12 +28,21 @@
         on_check_system,
         system_status = "ONLINE",
         assigned_user = null,
-        exam_type = "debug"
+        exam_type = "debug",
+        systemNumber: initialSystemNumber = "",
+        on_logout
     }: LoginPageProps = $props();
 
-    let step = $state(1);
-    let systemNumber = $state("");
+    let step = $state(initialSystemNumber ? 2 : 1);
+    let systemNumber = $state(initialSystemNumber);
     let otp = $state("");
+
+    $effect(() => {
+        if (initialSystemNumber && step === 1) {
+             systemNumber = initialSystemNumber;
+             step = 2;
+        }
+    });
 
     // Mocked data for Step 2
     let teamName = $derived(assigned_user || "WAITING FOR ASSIGNMENT...");
@@ -40,6 +51,10 @@
     let systemStatus = $derived(system_status); 
     let errorMessage = $state("");
 
+    // Initialize state if prop changes? 
+    // Actually, we want persistence. If parent passes updated prop, we might want to respect it?
+    // But for now initial load is key.
+    
     async function handleStep1Submit(e: SubmitEvent) {
         e.preventDefault();
         if (systemNumber.trim()) {
@@ -47,13 +62,11 @@
                 try {
                     const isValid = await on_check_system(systemNumber);
                     if (!isValid) {
-                         errorMessage = "System verification failed";
                          return;
                     }
                     step = 2; // Only proceed if valid
                     errorMessage = ""; 
                 } catch (e: any) {
-                    errorMessage = e.message || "System Error";
                     return;
                 }
             } else {
@@ -119,7 +132,18 @@
         </div>
 
         <!-- Login Form Side -->
-        <div class="form-panel">
+        <div class="form-panel relative">
+            {#if step === 2 && on_logout}
+                <button 
+                    onclick={on_logout}
+                    type="button"
+                    class="absolute top-6 right-6 text-white/40 hover:text-red-500 transition-colors cursor-pointer z-50 p-2 rounded-full hover:bg-white/5"
+                    title="Disconnect System"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                </button>
+            {/if}
+
             <div class="form-header">
                 <h2>{right_title}</h2>
                 <p>{right_subtitle}</p>
@@ -144,9 +168,6 @@
 
 
                     <button type="submit" class="btn-primary">NEXT >></button>
-                    {#if errorMessage && step === 1}
-                         <div class="text-red-500 font-bold text-center mt-4 bg-red-900/20 p-2 rounded border border-red-500/30 shadow-[0_0_10px_rgba(255,0,0,0.2)] animate-pulse">{errorMessage}</div>
-                    {/if}
                 </form>
             {:else}
                 <!-- STEP 2: Verify & OTP (Or Waiting Screen) -->

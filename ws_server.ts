@@ -26,6 +26,10 @@ export class WebSocketManager {
 		};
 	}
 
+	public isSystemConnected(id: number) {
+		return this.connectedSystems.has(id);
+	}
+
 	// Broadcast to strictly Admins
 	public broadcastAdmins(msg: any) {
 		const data = JSON.stringify(msg);
@@ -73,23 +77,28 @@ export class WebSocketManager {
 		console.log(`Client connected: ${ws.data.role} (${ws.data.name})`);
 
 		if (ws.data.role === "system") {
+			const existing = this.connectedSystems.get(ws.data.id);
 			this.connectedSystems.set(ws.data.id, ws);
+			if (existing) existing.close();
 
-			// Fetch full system details
 			const { system } = await db.getSystemById(ws.data.id);
 
-			// Mark as online in DB
-			await db.updateSystem(ws.data.id, { status: "online" });
+			if (system) {
+				// Only set to online if not in a persistent state
+				if (system.status !== 'exam' && system.status !== 'booked' && system.status !== 'completed') {
+					await db.updateSystem(ws.data.id, { status: "online" });
+				}
 
-			// Update the system object since we just changed status
-			if (system) system.status = "online";
+				// Re-fetch to get freshest data (including assigned_to_name) for broadcast
+				const { system: freshSystem } = await db.getSystemById(ws.data.id);
 
-			// Broadcast to ALL (as requested)
-			this.broadcastAll({
-				type: "system_online",
-				id: ws.data.id,
-				data: system
-			});
+				// Broadcast to ALL
+				this.broadcastAll({
+					type: "system_online",
+					id: ws.data.id,
+					data: freshSystem || system
+				});
+			}
 
 		} else if (ws.data.role === "admin" || ws.data.role === "superadmin") {
 			this.connectedAdmins.add(ws);
@@ -108,17 +117,33 @@ export class WebSocketManager {
 	}
 
 	// WS Handler: Close
-	public close(ws: ServerWebSocket<WSData>) {
+	public async close(ws: ServerWebSocket<WSData>) {
 		console.log(`Client disconnected: ${ws.data.role}`);
 
 		if (ws.data.role === "system") {
+			const current = this.connectedSystems.get(ws.data.id);
+			if (current && current !== ws) return;
+
 			this.connectedSystems.delete(ws.data.id);
 
-			// Update DB
-			db.updateSystem(ws.data.id, { status: "offline" });
-
-			// Broadcast offline to ALL
-			this.broadcastAll({ type: "system_offline", id: ws.data.id });
+			// Check if we should mark as offline
+			const { system } = await db.getSystemById(ws.data.id);
+			if (system && system.status !== 'exam' && system.status !== 'booked' && system.status !== 'completed') {
+				// Update DB
+				await db.updateSystem(ws.data.id, { status: "offline" });
+				// Broadcast offline to ALL
+				this.broadcastAll({ type: "system_offline", id: ws.data.id });
+			} else {
+				// If exam/booked, we don't change status to offline.
+				// But we typically want to know if they disconnected?
+				// For now, user request is paramount: "exam mode should stay".
+				// We do NOT broadcast system_offline if in exam mode?
+				// Or we broadcast it but UI keeps it as 'exam' status?
+				// If we don't broadcast offline, Admin thinks it's connected.
+				// If Admin tries to interact, it might fail? 
+				// But the requirement is about the STATUS field.
+				// Status 'exam' implies it's busy.
+			}
 
 		} else if (ws.data.role === "admin" || ws.data.role === "superadmin") {
 			this.connectedAdmins.delete(ws);

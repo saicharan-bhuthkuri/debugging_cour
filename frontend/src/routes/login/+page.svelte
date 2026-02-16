@@ -1,16 +1,37 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import LoginPage from "$lib/login/login_page.svelte";
     import { setToken } from "$lib/login/login_state.svelte";
     import { api } from "$lib/api";
     import * as ws from "$lib/ws.svelte";
+    import { goto } from "$app/navigation";
+    import StartExamDialog from "$lib/components/StartExamDialog.svelte";
 
     let error = $state("");
     let examType = $state("debug");
+    let levelInfo = $state<{id: number, name: string, duration: number} | null>(null);
+    let isStarting = $state(false);
+
+    onMount(async () => {
+        const saved = localStorage.getItem("system_code");
+        if (saved) {
+             await checkSystem(saved);
+        }
+    });
+
+    function handleLogout() {
+        if (confirm("Disconnect system?")) {
+            localStorage.removeItem("system_code");
+            localStorage.removeItem("login_token");
+            location.reload();
+        }
+    }
     
     // System State Management
     let systemStatus = $state("ONLINE");
     let assignedUser = $state<string | null>(null);
     let currentSystemCode = $state("");
+    let showStartDialog = $state(false);
 
     // Listen to WS messages
     $effect(() => {
@@ -21,7 +42,7 @@
                      const sys = msg.data;
                      
                      // Filter updates for current system if we have a code
-                     if (currentSystemCode && sys.code !== currentSystemCode) return;
+                     if (currentSystemCode && sys.code && sys.code.toLowerCase() !== currentSystemCode.toLowerCase()) return;
 
                      const status = sys.status ? sys.status.toLowerCase() : 'online';
                      
@@ -32,8 +53,17 @@
                      assignedUser = sys.assigned_to_name || null;
                      
                      if (sys.exam_type) examType = sys.exam_type;
+                     if (sys.level) levelInfo = sys.level;
+
+                      // Auto-start if admin pushed to exam mode while we are on login page
+                      if (status === 'exam' && !isStarting && !showStartDialog) {
+                          console.log("Admin forced Exam Mode via WS. Auto-starting...");
+                          handleStartExam();
+                      }
                  } else if (msg.type === "unregistered") {
                      // System deleted, refresh or reset
+                     localStorage.removeItem("system_code");
+                     localStorage.removeItem("login_token");
                      location.reload();
                  }
              });
@@ -43,7 +73,6 @@
 
     async function checkSystem(code: string) {
         try {
-            currentSystemCode = code;
             // Check & Auto Register
             const res = await api("/system/check", "POST", { code });
             if (res) {
@@ -55,21 +84,40 @@
                 else systemStatus = 'ONLINE';
                 assignedUser = res.assigned_to_name || null;
 
+                if (res.level) {
+                    levelInfo = res.level;
+                }
+
                 // Perform Initial "System Claim" Login (No OTP)
-                const token = await api("/login", "POST", { systemNumber: code });
+                const existingToken = localStorage.getItem("login_token") || "";
+                const token = await api("/login", "POST", { systemNumber: code }, existingToken);
                 if (token) {
                     setToken(token); // Store token
                     ws.connect(token); // Connect WS immediately
                     
                     // Optimistically set status to ONLINE as we are now active
                     if (systemStatus === 'OFFLINE') systemStatus = 'ONLINE';
+                    
+                    localStorage.setItem("system_code", code);
+                    currentSystemCode = code;
+
+                    // If system is already in exam mode, jump in
+                    if (status === 'exam' && !isStarting) {
+                        console.log("System already in Exam Mode. Resuming...");
+                        handleStartExam();
+                    }
                 }
                 
                 return true;
             }
+            localStorage.removeItem("system_code");
             return false;
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
+            error = e.message;
+            systemStatus = "OFFLINE";
+            localStorage.removeItem("system_code");
+            localStorage.removeItem("login_token");
             return false;
         }
     }
@@ -82,11 +130,8 @@
             const res = await api("/system/verify", "POST", { otp: data.otp }, localStorage.getItem("login_token") || "");
             
             if (res === "Verified") {
-                // Determine next step
-                // Start Exam UI or Redirect
-                alert("Exam Sequence Initiated!"); 
-                // Navigate to Exam Page or switch view
-                // goto("/exam"); 
+                // Show dialog to start
+                showStartDialog = true;
             } else {
                  error = "Verification failed";
             }
@@ -96,8 +141,34 @@
         }
     }
 
+    async function handleStartExam() {
+        if (isStarting) return;
+        isStarting = true;
+        try {
+            const res = await api("/system/start", "POST", {}, localStorage.getItem("login_token") || "");
+            if (res && res.sessionId) {
+                localStorage.setItem("exam_session_id", res.sessionId.toString());
+                if (res.duration) {
+                    localStorage.setItem("exam_duration", res.duration.toString());
+                }
+            }
+            goto(`/${examType}`);
+        } catch (e) {
+            console.error("Failed to start exam", e);
+            error = "Failed to start exam";
+            isStarting = false;
+        }
+    }
+
     function close_error() {
         error = "";
+    }
+
+    function formatDuration(seconds: number): string {
+        const min = Math.floor(seconds / 60);
+        const sec = seconds % 60;
+        if (sec === 0) return `${min}:00`;
+        return `${min}:${sec.toString().padStart(2, '0')}`;
     }
 
     let uiProps = $derived(examType === 'typing' ? {
@@ -113,10 +184,10 @@
     } : {
         description: "Initiate coding sequence. Analyze logic, debug errors, and accurately type working solutions within the given time window.",
         grid: [
-            { h2: "15:00", p: "Time Limit" },
-            { h2: "Debug + Type", p: "Task Mode" },
+            { h2: formatDuration(levelInfo?.duration || 900), p: "Time Limit" },
+            { h2: levelInfo?.name || "Debug", p: "Level" },
             { h2: "Logic & Speed", p: "Core Focus" },
-            { h2: "Solo/Team", p: "Unit Type" }
+            { h2: "Solo", p: "Unit Type" }
         ],
         right_title: "Access Terminal",
         right_subtitle: "Enter credentials to begin simulation"
@@ -143,6 +214,13 @@
     </div>
 {/if}
 
+{#if showStartDialog}
+    <StartExamDialog 
+        onStart={handleStartExam} 
+        examType={examType} 
+    />
+{/if}
+
 <LoginPage
     left_title={title}
     left_description={uiProps.description}
@@ -154,6 +232,8 @@
     system_status={systemStatus as "ONLINE" | "OFFLINE" | "BOOKED"}
     assigned_user={assignedUser}
     exam_type={examType}
+    systemNumber={currentSystemCode}
+    on_logout={handleLogout}
 />
 
 <style>

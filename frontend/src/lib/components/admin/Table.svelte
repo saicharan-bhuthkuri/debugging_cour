@@ -3,6 +3,7 @@
     key: keyof T | 'actions';
     label: string;
     render?: (row: T) => any;
+    headerRender?: () => any;
   };
   
   type Props<T> = {
@@ -20,7 +21,11 @@
       <tr>
         {#each columns as col}
           <th class="px-6 py-3 font-semibold text-gray-500 uppercase text-xs tracking-wider">
-            {col.label}
+            {#if col.headerRender}
+              {@render col.headerRender()}
+            {:else}
+              {col.label}
+            {/if}
           </th>
         {/each}
       </tr>
