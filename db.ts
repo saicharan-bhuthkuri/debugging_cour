@@ -84,6 +84,13 @@ export async function initDB() {
             data TEXT
         )`;
 
+        await db`CREATE TABLE IF NOT EXISTS debug_submission_grades (
+            session_id INTEGER,
+            question_id INTEGER,
+            is_correct BOOLEAN DEFAULT 0,
+            PRIMARY KEY (session_id, question_id)
+        )`;
+
         // Check for default super admin
         const superAdmins = await db`SELECT * FROM users WHERE role = 'superadmin' LIMIT 1`;
         if (superAdmins.length === 0) {
@@ -511,12 +518,328 @@ export async function createSystemLog(data: { exam_session_id: number, user_id: 
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 
-// --- RESULTS (STUBS) ---
+// --- LOGS ---
 
-export async function getTypingResults() {
-    return { results: [] };
+export async function getAllLogs(options: {
+    limit?: number,
+    offset?: number,
+    log_type?: string,
+    session_id?: number,
+    user_id?: number,
+    system_code?: string,
+    search?: string
+} = {}) {
+    try {
+        const limit = options.limit || 100;
+        const offset = options.offset || 0;
+        const searchPattern = options.search ? `%${options.search}%` : null;
+
+        const logs = await db`SELECT sl.*, u.name as user_name, u.branch, u.college, u.year
+            FROM system_logs sl
+            LEFT JOIN users u ON sl.user_id = u.id
+            WHERE
+                (${options.log_type} IS NULL OR sl.log_type = ${options.log_type}) AND
+                (${options.session_id} IS NULL OR sl.exam_session_id = ${options.session_id}) AND
+                (${options.user_id} IS NULL OR sl.user_id = ${options.user_id}) AND
+                (${options.system_code} IS NULL OR sl.system_code = ${options.system_code}) AND
+                (${searchPattern} IS NULL OR (u.name LIKE ${searchPattern} OR sl.system_code LIKE ${searchPattern} OR sl.log_type LIKE ${searchPattern}))
+            ORDER BY sl.timestamp DESC
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        const countResult = await db`SELECT COUNT(*) as count FROM system_logs sl
+            LEFT JOIN users u ON sl.user_id = u.id
+            WHERE
+                (${options.log_type} IS NULL OR sl.log_type = ${options.log_type}) AND
+                (${options.session_id} IS NULL OR sl.exam_session_id = ${options.session_id}) AND
+                (${options.user_id} IS NULL OR sl.user_id = ${options.user_id}) AND
+                (${options.system_code} IS NULL OR sl.system_code = ${options.system_code}) AND
+                (${searchPattern} IS NULL OR (u.name LIKE ${searchPattern} OR sl.system_code LIKE ${searchPattern} OR sl.log_type LIKE ${searchPattern}))
+        `;
+
+        // Parse data JSON for each log
+        for (const log of logs) {
+            try { if (log.data && typeof log.data === 'string') log.data = JSON.parse(log.data); } catch { }
+        }
+
+        return { logs, total: countResult[0]?.count || 0 };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
 }
 
-export async function getDebugResults() {
-    return { results: [] };
+export async function getLogTypes() {
+    try {
+        const types = await db`SELECT DISTINCT log_type FROM system_logs WHERE log_type IS NOT NULL ORDER BY log_type`;
+        return { types: types.map((t: any) => t.log_type) };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+export async function batchCreateLogs(logs: Array<{ exam_session_id: number, user_id: number, system_code: string, log_type: string, data: any, timestamp?: string }>) {
+    try {
+        let created = 0;
+        for (const log of logs) {
+            const logData = typeof log.data === 'string' ? log.data : JSON.stringify(log.data);
+            const ts = log.timestamp || new Date().toISOString();
+            await db`INSERT INTO system_logs (exam_session_id, user_id, system_code, log_type, data, timestamp)
+                VALUES (${log.exam_session_id}, ${log.user_id}, ${log.system_code}, ${log.log_type}, ${logData}, ${ts})`;
+            created++;
+        }
+        return { created };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+// --- EXAM SESSIONS (Enhanced) ---
+
+export async function getAllExamSessions(options: {
+    limit?: number,
+    offset?: number,
+    exam_mode?: string,
+    status?: string,
+    user_id?: number,
+    search?: string
+} = {}) {
+    try {
+        const limit = options.limit || 100;
+        const offset = options.offset || 0;
+        const searchPattern = options.search ? `%${options.search}%` : null;
+
+        const sessions = await db`SELECT es.*, 
+            u.name as user_name, u.branch, u.college, u.year as user_year, u.phone,
+            s.code as system_code
+            FROM exam_sessions es
+            LEFT JOIN users u ON es.user_id = u.id
+            LEFT JOIN systems s ON es.system_id = s.id
+            WHERE
+                (${options.exam_mode} IS NULL OR es.exam_mode = ${options.exam_mode}) AND
+                (${options.status} IS NULL OR es.status = ${options.status}) AND
+                (${options.user_id} IS NULL OR es.user_id = ${options.user_id}) AND
+                (${searchPattern} IS NULL OR (u.name LIKE ${searchPattern} OR s.code LIKE ${searchPattern}))
+            ORDER BY es.start_time DESC
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        const countResult = await db`SELECT COUNT(*) as count FROM exam_sessions es
+            LEFT JOIN users u ON es.user_id = u.id
+            LEFT JOIN systems s ON es.system_id = s.id
+            WHERE
+                (${options.exam_mode} IS NULL OR es.exam_mode = ${options.exam_mode}) AND
+                (${options.status} IS NULL OR es.status = ${options.status}) AND
+                (${options.user_id} IS NULL OR es.user_id = ${options.user_id}) AND
+                (${searchPattern} IS NULL OR (u.name LIKE ${searchPattern} OR s.code LIKE ${searchPattern}))
+        `;
+
+        return { sessions, total: countResult[0]?.count || 0 };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+export async function getExamSessionById(id: number) {
+    try {
+        const sessions = await db`SELECT es.*, 
+            u.name as user_name, u.branch, u.college, u.year as user_year, u.phone,
+            s.code as system_code
+            FROM exam_sessions es
+            LEFT JOIN users u ON es.user_id = u.id
+            LEFT JOIN systems s ON es.system_id = s.id
+            WHERE es.id = ${id}
+        `;
+        return { session: sessions[0] };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+export async function getSessionLogs(sessionId: number) {
+    try {
+        const logs = await db`SELECT * FROM system_logs WHERE exam_session_id = ${sessionId} ORDER BY timestamp ASC`;
+        for (const log of logs) {
+            try { if (log.data && typeof log.data === 'string') log.data = JSON.parse(log.data); } catch { }
+        }
+        return { logs };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+// --- RESULTS (from logs) ---
+
+export async function getExamResults(options: {
+    exam_mode?: string,
+    college?: string,
+    branch?: string,
+    year?: number,
+    level_id?: number
+} = {}) {
+    try {
+        // Get all completed exam sessions with user info
+        const sessions = await db`SELECT es.*, 
+            u.name as user_name, u.branch, u.college, u.year as user_year, u.phone,
+            s.code as system_code, s.assigned_level_id, s.exam_type,
+            dl.name as level_name
+            FROM exam_sessions es
+            LEFT JOIN users u ON es.user_id = u.id
+            LEFT JOIN systems s ON es.system_id = s.id
+            LEFT JOIN debug_levels dl ON s.assigned_level_id = dl.id
+            WHERE
+                (${options.exam_mode} IS NULL OR es.exam_mode = ${options.exam_mode}) AND
+                (${options.college} IS NULL OR u.college = ${options.college}) AND
+                (${options.branch} IS NULL OR u.branch = ${options.branch}) AND
+                (${options.year} IS NULL OR u.year = ${options.year}) AND
+                (${options.level_id} IS NULL OR s.assigned_level_id = ${options.level_id})
+            ORDER BY es.start_time DESC
+        `;
+
+        // Get all submission grades for all sessions in this request at once to avoid N+1 queries
+        const allGrades = await db`SELECT * FROM debug_submission_grades WHERE session_id IN (${sessions.map((s: any) => s.id)})`;
+        const gradesMap = new Map<number, Map<number, boolean>>();
+        allGrades.forEach((g: any) => {
+            if (!gradesMap.has(g.session_id)) gradesMap.set(g.session_id, new Map());
+            gradesMap.get(g.session_id)!.set(g.question_id, g.is_correct === 1);
+        });
+
+        // Get all questions to have difficulty info
+        const { questions } = await getAllDebugQuestions();
+        const questionMap = new Map<number, any>((questions || []).map((q: any) => [q.id, q]));
+
+        // For each session, get submission logs to compute results
+        const results: any[] = [];
+        for (const session of sessions) {
+            const logs = await db`SELECT * FROM system_logs 
+                WHERE exam_session_id = ${session.id} 
+                AND (log_type = 'SUBMIT' OR log_type = 'AUTO_SUBMIT_TIMEOUT' OR log_type = 'AUTO_SUBMIT_FINAL' OR log_type = 'EXAM_START' OR log_type = 'EXAM_FINISH' OR log_type = 'DISQUALIFIED')
+                ORDER BY timestamp ASC`;
+
+            let submitted = 0;
+            let autoSubmitted = 0;
+            let startTime: string | null = null;
+            let endTime: string | null = null;
+            let disqualified = false;
+            let totalScore = 0;
+            const submissions: any[] = [];
+            const sessionGradesMap = gradesMap.get(session.id) || new Map();
+
+            for (const log of logs) {
+                let data: any = {};
+                try { data = typeof log.data === 'string' ? JSON.parse(log.data) : (log.data || {}); } catch { }
+
+                if (log.log_type === 'EXAM_START') {
+                    startTime = data.timestamp || log.timestamp;
+                } else if (log.log_type === 'EXAM_FINISH') {
+                    endTime = data.timestamp || log.timestamp;
+                } else if (log.log_type === 'DISQUALIFIED') {
+                    disqualified = true;
+                    endTime = data.timestamp || log.timestamp;
+                } else if (log.log_type === 'SUBMIT' || log.log_type === 'AUTO_SUBMIT_TIMEOUT' || log.log_type === 'AUTO_SUBMIT_FINAL') {
+                    const isAuto = log.log_type !== 'SUBMIT';
+                    if (isAuto) autoSubmitted++; else submitted++;
+
+                    const qId = data.question_id;
+                    const qInfo = questionMap.get(qId);
+                    const isCorrect = sessionGradesMap.get(qId) || false;
+
+                    // Difficulty Points: Easy=5, Medium=10, Hard=15
+                    if (isCorrect && qInfo) {
+                        const difficulty = qInfo.difficulty?.toLowerCase();
+                        if (difficulty === 'easy') totalScore += 5;
+                        else if (difficulty === 'medium') totalScore += 10;
+                        else if (difficulty === 'hard') totalScore += 15;
+                        else totalScore += 5; // Default for others
+                    }
+
+                    submissions.push({
+                        question_id: qId,
+                        question_title: data.question_title || qInfo?.title,
+                        answer: data.answer,
+                        question_type: data.question_type || qInfo?.question_type,
+                        marked_lines: data.marked_lines,
+                        added_lines: data.added_lines,
+                        timestamp: data.timestamp || log.timestamp,
+                        auto: isAuto,
+                        reason: data.reason,
+                        is_correct: isCorrect,
+                        difficulty: qInfo?.difficulty
+                    });
+                }
+            }
+
+            results.push({
+                session_id: session.id,
+                user_id: session.user_id,
+                user_name: session.user_name,
+                branch: session.branch,
+                college: session.college,
+                year: session.user_year,
+                phone: session.phone,
+                system_code: session.system_code,
+                exam_mode: session.exam_mode,
+                level_name: session.level_name || 'N/A',
+                level_id: session.assigned_level_id,
+                status: session.status,
+                start_time: startTime || session.start_time,
+                end_time: endTime || session.end_time,
+                submitted,
+                auto_submitted: autoSubmitted,
+                total_questions: submitted + autoSubmitted,
+                disqualified,
+                submissions,
+                total_score: totalScore
+            });
+        }
+
+        return { results };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+export async function gradeSubmission(sessionId: number, questionId: number, isCorrect: boolean) {
+    try {
+        const val = isCorrect ? 1 : 0;
+        await db`INSERT INTO debug_submission_grades (session_id, question_id, is_correct)
+            VALUES (${sessionId}, ${questionId}, ${val})
+            ON CONFLICT(session_id, question_id) 
+            DO UPDATE SET is_correct = ${val}`;
+
+        // Also update the score in exam_sessions for persistence/stat purposes if needed
+        // But we calculate it on the fly currently in getExamResults.
+        // Let's also update it in the session table for easy access.
+
+        const { results } = await getExamResults({ exam_mode: undefined }); // Trigger calculation
+        if (results) {
+            const sessionResult = results.find((r: any) => r.session_id === sessionId);
+            if (sessionResult) {
+                await db`UPDATE exam_sessions SET score = ${sessionResult.total_score} WHERE id = ${sessionId}`;
+            }
+        }
+
+        return { success: true };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+export async function getResultGroupOptions() {
+    try {
+        const colleges = await db`SELECT DISTINCT u.college FROM exam_sessions es LEFT JOIN users u ON es.user_id = u.id WHERE u.college IS NOT NULL AND u.college != '' ORDER BY u.college`;
+        const branches = await db`SELECT DISTINCT u.branch FROM exam_sessions es LEFT JOIN users u ON es.user_id = u.id WHERE u.branch IS NOT NULL AND u.branch != '' ORDER BY u.branch`;
+        const years = await db`SELECT DISTINCT u.year FROM exam_sessions es LEFT JOIN users u ON es.user_id = u.id WHERE u.year IS NOT NULL ORDER BY u.year`;
+        const levels = await db`SELECT DISTINCT dl.id, dl.name FROM exam_sessions es LEFT JOIN systems s ON es.system_id = s.id LEFT JOIN debug_levels dl ON s.assigned_level_id = dl.id WHERE dl.id IS NOT NULL ORDER BY dl.name`;
+        const modes = await db`SELECT DISTINCT exam_mode FROM exam_sessions WHERE exam_mode IS NOT NULL ORDER BY exam_mode`;
+
+        return {
+            colleges: colleges.map((c: any) => c.college),
+            branches: branches.map((b: any) => b.branch),
+            years: years.map((y: any) => y.year),
+            levels: levels.map((l: any) => ({ id: l.id, name: l.name })),
+            modes: modes.map((m: any) => m.exam_mode)
+        };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
 }

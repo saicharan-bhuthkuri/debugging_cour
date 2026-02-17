@@ -17,6 +17,7 @@
         onchange?: (value: string) => void;
         onmarkedlines?: (lines: number[]) => void;
         onaddedlines?: (data: { afterLine: number; content: string }[]) => void;
+        addedLines?: { afterLine: number; content: string }[];
     }
 
     let {
@@ -26,7 +27,8 @@
         answerMeta = null,
         onchange,
         onmarkedlines,
-        onaddedlines
+        onaddedlines,
+        addedLines = [] // New prop to restore state
     }: Props = $props();
 
     let editorContainer: HTMLDivElement;
@@ -120,7 +122,7 @@
     let showContextMenu = $state(false);
     let contextMenuPos = $state({ x: 0, y: 0 });
     let contextMenuLine = $state(0);
-    let addedLinesMap: Map<number, string> = new Map();
+    let addedLinesMap = $state(new Map<number, string>());
     let bypassFilter = false; // bypass flag for programmatic inserts
 
     // Decoration for added lines
@@ -147,6 +149,31 @@
         }
     }
 
+    // Custom Backspace handler for added lines
+    const addedLinesKeymap = [
+        {
+            key: "Backspace",
+            run: (view: EditorView) => {
+                const { state } = view;
+                const { doc, selection } = state;
+                
+                // Only handle single cursor for now
+                if (selection.ranges.length !== 1 || !selection.main.empty) return false;
+                
+                const pos = selection.main.head;
+                const line = doc.lineAt(pos);
+                
+                // Check if we are on an added line and it is empty
+                if (addedLinesMap.has(line.number) && line.length === 0) {
+                    deleteLine(line.number);
+                    return true;
+                }
+                
+                return false;
+            }
+        }
+    ];
+
     function buildExtensions() {
         const langExt = getLanguageExtension(language);
         const baseExtensions = [
@@ -155,7 +182,7 @@
             oneDark,
             syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
             history(),
-            keymap.of([...defaultKeymap, ...historyKeymap]),
+            keymap.of([...addedLinesKeymap, ...defaultKeymap, ...historyKeymap]),
             EditorView.theme({
                 "&": {
                     fontSize: "13px",
@@ -271,13 +298,17 @@
                     if (bypassFilter) return tr;
                     // Allow changes only in added lines
                     let allowed = true;
-                    tr.changes.iterChanges((fromA, toA) => {
+                    tr.changes.iterChanges((fromA, toA, fromB, toB, text) => {
                         const lineStart = tr.startState.doc.lineAt(fromA).number;
                         const lineEnd = tr.startState.doc.lineAt(Math.min(toA, tr.startState.doc.length)).number;
                         for (let l = lineStart; l <= lineEnd; l++) {
                             if (!addedLinesMap.has(l)) {
                                 allowed = false;
                             }
+                        }
+                        // Strictly block line count changes (Enter, multi-line paste, merging lines)
+                        if (text.lines > 1 || tr.startState.doc.sliceString(fromA, toA).includes('\n')) {
+                            allowed = false;
                         }
                     });
                     if (!allowed) return [];
@@ -290,7 +321,10 @@
                         if (pos !== null) {
                             const line = view.state.doc.lineAt(pos);
                             contextMenuLine = line.number;
-                            contextMenuPos = { x: event.clientX, y: event.clientY };
+                            // Ensure the menu stays within viewport
+                            const x = Math.min(event.clientX, window.innerWidth - 220);
+                            const y = Math.min(event.clientY, window.innerHeight - 100);
+                            contextMenuPos = { x, y };
                             showContextMenu = true;
                         }
                         return true;
@@ -323,13 +357,17 @@
                 EditorState.transactionFilter.of(tr => {
                     if (!tr.docChanged) return tr;
                     let allowed = true;
-                    tr.changes.iterChanges((fromA, toA) => {
+                    tr.changes.iterChanges((fromA, toA, fromB, toB, text) => {
                         const lineStart = tr.startState.doc.lineAt(fromA).number;
                         const lineEnd = tr.startState.doc.lineAt(Math.min(toA, tr.startState.doc.length)).number;
                         for (let l = lineStart; l <= lineEnd; l++) {
                             if (!editableLines.includes(l)) {
                                 allowed = false;
                             }
+                        }
+                        // Strictly block line count changes (Enter, multi-line paste, merging lines)
+                        if (text.lines > 1 || tr.startState.doc.sliceString(fromA, toA).includes('\n')) {
+                            allowed = false;
                         }
                     });
                     if (!allowed) return [];
@@ -369,6 +407,7 @@
         // Focus the new line
         setTimeout(() => {
             if (editorView) {
+                // Refresh map from doc to be safe? No, logic is sound.
                 const newLine = editorView.state.doc.line(newLineNum);
                 editorView.dispatch({
                     selection: { anchor: newLine.from }
@@ -378,7 +417,54 @@
         }, 10);
 
         showContextMenu = false;
+        notifyAddedLines();
+    }
 
+    function deleteLine(lineNum: number) {
+        if (!editorView || !addedLinesMap.has(lineNum)) return;
+        
+        const line = editorView.state.doc.line(lineNum);
+        
+        // Update tracking: shift existing added lines up
+        // Line to delete is lineNum.
+        // Lines > lineNum become ln - 1.
+        const newMap = new Map<number, string>();
+        for (const [ln, content] of addedLinesMap) {
+            if (ln === lineNum) continue;
+            if (ln > lineNum) {
+                 newMap.set(ln - 1, content);
+            } else {
+                 newMap.set(ln, content);
+            }
+        }
+        addedLinesMap = newMap;
+
+        bypassFilter = true;
+        
+        let from = line.from;
+        let to = line.to;
+
+        if (lineNum < editorView.state.doc.lines) {
+            // Not the last line: delete from start of this line to start of next line
+            to = editorView.state.doc.line(lineNum + 1).from;
+        } else if (lineNum > 1) {
+            // Last line (and not the only line): delete from end of previous line to end of this line
+            from = editorView.state.doc.line(lineNum - 1).to;
+        } else {
+            // Only line in document: just clear it
+            to = line.to;
+        }
+
+        editorView.dispatch({
+            changes: { from, to }
+        });
+        
+        bypassFilter = false;
+        showContextMenu = false;
+        notifyAddedLines();
+    }
+
+    function notifyAddedLines() {
         if (onaddedlines) {
             const result = Array.from(addedLinesMap.entries()).map(([line, content]) => ({
                 afterLine: line - 1,
@@ -404,6 +490,18 @@
         // Restore marked lines if provided in answerMeta for find_buggy_line
         if (mode === 'find_buggy_line' && answerMeta?.marked_lines) {
             // Admin preview: show pre-marked lines
+        }
+
+        // Initialize addedLinesMap from prop
+        if (mode === 'add_lines' && addedLines.length > 0) {
+             const newMap = new Map<number, string>();
+             addedLines.forEach(item => {
+                 // item.afterLine corresponds to the line index (0-based) *before* the inserted line.
+                 // So the inserted line number is item.afterLine + 1.
+                 // NOTE: This assumes addedLines array is persistent and `code` reflects the state with these lines.
+                 newMap.set(item.afterLine + 1, item.content);
+             });
+             addedLinesMap = newMap;
         }
     });
 
@@ -438,7 +536,7 @@
 
 <svelte:window onclick={handleGlobalClick} />
 
-<div class="code-editor-wrapper">
+<div class="code-editor-wrapper {mode === 'add_lines' ? 'allow-context-menu' : ''}">
     <!-- Mode indicator -->
     <div class="mode-bar">
         {#if mode === 'full_edit'}
@@ -479,6 +577,15 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Insert line after Line {contextMenuLine}
             </button>
+            {#if addedLinesMap.has(contextMenuLine)}
+                <button
+                    class="context-menu-item item-delete"
+                    onclick={(e) => { e.stopPropagation(); deleteLine(contextMenuLine); }}
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    Delete Line {contextMenuLine}
+                </button>
+            {/if}
         </div>
     {/if}
 </div>
@@ -604,9 +711,9 @@
         transition: background 0.15s;
     }
 
-    .context-menu-item:hover {
-        background: rgba(74, 222, 128, 0.12);
-        color: #4ade80;
+    .context-menu-item.item-delete:hover {
+        background: rgba(239, 68, 68, 0.12);
+        color: #f87171;
     }
 
     .context-menu-item svg {

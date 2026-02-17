@@ -4,6 +4,7 @@
     import { goto } from "$app/navigation";
     import { openDB } from "idb";
     import CodeEditor from "$lib/components/CodeEditor.svelte";
+    import ExamGuard from "$lib/components/ExamGuard.svelte";
     import "./debug.css";
 
     let questions: any[] = $state([]);
@@ -118,6 +119,9 @@
 
             loading = false;
             startTimer();
+            
+            // Sync any pending logs from previous offline sessions
+            syncPendingLogs();
         } catch (e) {
             console.error("Failed to init exam", e);
             alert("Failed to load exam. Please refresh.");
@@ -141,31 +145,68 @@
     
     async function saveState() {
         const db = await dbPromise;
-        const stateToSave = {
+        const stateToSave = $state.snapshot({
              sessionId: examSessionId,
-             questions: JSON.parse(JSON.stringify(questions)),
-             questionStates: JSON.parse(JSON.stringify(questionStates)),
+             questions,
+             questionStates,
              currentIndex,
              timeRemaining,
              timestamp: Date.now()
-        };
+        });
         await db.put(STORE_STATE, stateToSave, "current_session");
     }
 
     async function logAction(type: string, data: any = {}) {
+        const snapshottedData = $state.snapshot(data);
         const payload = {
             session_id: examSessionId,
             type,
-            data: { ...data, timestamp: new Date().toISOString() }
+            data: { ...snapshottedData, timestamp: new Date().toISOString() }
         };
 
         const db = await dbPromise;
-        await db.add(STORE_LOGS, payload);
+        const logEntry = { ...payload, synced: false };
+        const key = await db.add(STORE_LOGS, logEntry);
 
         try {
-             api("/system/log", "POST", payload, localStorage.getItem("login_token") || "");
+             await api("/system/log", "POST", payload, localStorage.getItem("login_token") || "");
+             // Mark as synced
+             const stored = await db.get(STORE_LOGS, key);
+             if (stored) {
+                 stored.synced = true;
+                 await db.put(STORE_LOGS, stored);
+             }
         } catch (e) {
-             console.error("Log failed upload", e);
+             console.error("Log failed upload, queued for re-sync", e);
+        }
+    }
+
+    async function syncPendingLogs() {
+        try {
+            const db = await dbPromise;
+            const allLogs = await db.getAll(STORE_LOGS);
+            const pending = allLogs.filter((l: any) => !l.synced);
+            
+            if (pending.length === 0) return;
+
+            const token = localStorage.getItem("login_token") || "";
+            for (const log of pending) {
+                try {
+                    await api("/system/log", "POST", {
+                        session_id: log.session_id,
+                        type: log.type,
+                        data: log.data
+                    }, token);
+                    // Mark as synced
+                    log.synced = true;
+                    await db.put(STORE_LOGS, log);
+                } catch (e) {
+                    // Still offline, stop trying
+                    break;
+                }
+            }
+        } catch (e) {
+            console.error("Failed to sync pending logs", e);
         }
     }
 
@@ -175,7 +216,7 @@
             currentIndex = index;
             runOutput = ""; // Clear output on navigation
             if (questions[index] && questions[index].id) {
-                logAction("NAVIGATE", { question_id: questions[index].id, from: currentIndex });
+                // logAction("NAVIGATE", { question_id: questions[index].id, from: currentIndex });
             }
         }
     }
@@ -217,12 +258,14 @@
         }
     }
 
-    function handleSubmit() {
+    async function handleSubmit() {
         const q = questions[currentIndex];
          if (q && questionStates[q.id]) {
             questionStates[q.id].status = 'submitted';
             const logData: any = {
                 question_id: q.id,
+                question_title: q.title || '',
+                original_code: q.code_snippet || '',
                 answer: questionStates[q.id].answer,
                 question_type: q.question_type || 'full_edit'
             };
@@ -233,8 +276,16 @@
             if (q.question_type === 'add_lines') {
                 logData.added_lines = questionStates[q.id].addedLines || [];
             }
-            logAction("SUBMIT", logData);
-            saveState();
+            
+            try {
+                // Ensure data is snapshotted before passing to logAction/saveState
+                const finalLogData = $state.snapshot(logData);
+                await logAction("SUBMIT", finalLogData);
+                await saveState();
+            } catch (err) {
+                console.error("Error submitting:", err);
+            }
+            
             if (currentIndex < questions.length - 1) next();
         }
     }
@@ -255,7 +306,10 @@
                 state.status = 'submitted';
                 logAction(force ? "AUTO_SUBMIT_TIMEOUT" : "AUTO_SUBMIT_FINAL", { 
                     question_id: q.id, 
+                    question_title: q.title || '',
+                    original_code: q.code_snippet || '',
                     answer: state.answer,
+                    question_type: q.question_type || 'full_edit',
                     reason: state.status // skipped, hold, or unvisited
                 });
             }
@@ -264,7 +318,7 @@
         logAction("EXAM_FINISH", { reason: force ? "TIMEOUT" : "USER_INITIATED" });
         
         try {
-            await api("/system/finish", "POST", { session_id: examSessionId }, localStorage.getItem("login_token") || "");
+            await api("/system/finish", "POST", { session_id: examSessionId, reason: "normal" }, localStorage.getItem("login_token") || "");
         } catch (e) {
             console.error("Failed to finish exam on server", e);
         }
@@ -360,6 +414,7 @@
     });
 </script>
 
+<ExamGuard examMode={true} enableFullscreen={true} enableCopyPaste={true}>
 {#if loading}
     <div class="full-screen">Loading Exam...</div>
 {:else}
@@ -481,6 +536,7 @@
                         onchange={handleCodeChange}
                         onmarkedlines={handleMarkedLines}
                         onaddedlines={handleAddedLines}
+                        addedLines={questionStates[currentQ.id].addedLines || []}
                     />
                 {/key}
             {/if}
@@ -529,3 +585,4 @@
         </div>
     {/if}
 {/if}
+</ExamGuard>

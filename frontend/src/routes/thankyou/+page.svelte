@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from "svelte";
     import { goto } from "$app/navigation";
     import * as ws from "$lib/ws.svelte";
+    import ExamGuard from "$lib/components/ExamGuard.svelte";
 
     // Prevent back navigation to exam
     onMount(() => {
@@ -37,6 +38,11 @@
                         // Admin has re-activated the system, redirect to login
                         localStorage.removeItem("exam_session_id");
                         goto("/login");
+                    } else if (status === 'exam') {
+                        // Admin pushed back to exam mode — resume exam
+                        // Progress is still saved in IDB
+                        const examType = sys.exam_type || 'debug';
+                        goto(`/${examType}`);
                     }
                 }
             });
@@ -45,6 +51,7 @@
     });
 </script>
 
+<ExamGuard examMode={false} enableFullscreen={true} enableCopyPaste={true}>
 <div class="thankyou-page">
     <div class="card">
         <div class="icon-wrap">
@@ -60,6 +67,7 @@
         </div>
     </div>
 </div>
+</ExamGuard>
 
 <style>
     :global(body) { 

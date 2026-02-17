@@ -6,6 +6,7 @@
     import * as ws from "$lib/ws.svelte";
     import { goto } from "$app/navigation";
     import StartExamDialog from "$lib/components/StartExamDialog.svelte";
+    import ExamGuard from "$lib/components/ExamGuard.svelte";
 
     let error = $state("");
     let examType = $state("debug");
@@ -202,6 +203,7 @@
     {/if}
 {/snippet}
 
+<ExamGuard examMode={false} enableFullscreen={true} enableCopyPaste={true}>
 {#if error !== ""}
     <div class="full-screen">
         <div class="dialog">
@@ -235,6 +237,7 @@
     systemNumber={currentSystemCode}
     on_logout={handleLogout}
 />
+</ExamGuard>
 
 <style>
     .full-screen {

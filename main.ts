@@ -351,17 +351,46 @@ const server = Bun.serve<WSData>({
                 const { system } = await db.getSystemByCode((payload as any).name);
                 if (!system) throw new HttpError("System invalid", 404);
 
-                // Generate new OTP
-                const newOtp = Math.floor(10000 + Math.random() * 90000).toString();
+                const body = await parseJSON<any>(req);
+                const reason = body?.reason || "normal";
+                let sessionId = body?.session_id;
 
-                await db.updateSystem(system.id, {
-                    status: 'completed',
-                    assigned_to: null,
-                    login_otp: newOtp
-                });
+                // Fallback: Find ongoing session if not provided
+                if (!sessionId && system.assigned_to) {
+                    const { sessions } = await db.getAllExamSessions({
+                        user_id: system.assigned_to,
+                        status: 'ongoing',
+                        limit: 1
+                    });
+                    if (sessions && sessions.length > 0) {
+                        sessionId = sessions[0].id;
+                    }
+                }
 
-                // Check if session exists and mark it? (Optional, handled by logs usually but good to close session)
-                // We'll rely on the logs for now or explicit update if session_id passed.
+                // Update Exam Session Status
+                if (sessionId) {
+                    await db.updateExamSession(Number(sessionId), {
+                        status: reason === "disqualified" ? "disqualified" : "completed",
+                        end_time: new Date().toISOString()
+                    });
+                }
+
+                if (reason === "disqualified") {
+                    // Disqualification: mark as completed but KEEP assigned_to
+                    // so admin can push back to exam mode and student can resume
+                    await db.updateSystem(system.id, {
+                        status: 'completed'
+                        // Keep assigned_to and login_otp intact
+                    });
+                } else {
+                    // Normal finish: clear user assignment
+                    const newOtp = Math.floor(10000 + Math.random() * 90000).toString();
+                    await db.updateSystem(system.id, {
+                        status: 'completed',
+                        assigned_to: null,
+                        login_otp: newOtp
+                    });
+                }
 
                 // Broadcast change
                 await notifySystemUpdate(system.id);
@@ -739,22 +768,162 @@ const server = Bun.serve<WSData>({
             })
         },
 
-        // --- RESULTS ---
-        "/typing/result": {
+        // --- ADMIN: LOGS ---
+        "/admin/logs": {
             OPTIONS: () => Res(null, { status: 204 }),
             GET: handler(async req => {
                 await requireAdmin(req);
-                const { results } = await db.getTypingResults();
-                return Res(JSON.stringify({ result: results }));
-            }),
+                const url = new URL(req.url);
+                const options: any = {};
+                if (url.searchParams.get('log_type')) options.log_type = url.searchParams.get('log_type');
+                if (url.searchParams.get('session_id')) options.session_id = parseInt(url.searchParams.get('session_id')!);
+                if (url.searchParams.get('user_id')) options.user_id = parseInt(url.searchParams.get('user_id')!);
+                if (url.searchParams.get('system_code')) options.system_code = url.searchParams.get('system_code');
+                if (url.searchParams.get('search')) options.search = url.searchParams.get('search');
+                if (url.searchParams.get('limit')) options.limit = parseInt(url.searchParams.get('limit')!);
+                if (url.searchParams.get('offset')) options.offset = parseInt(url.searchParams.get('offset')!);
+
+                const { logs, total, error } = await db.getAllLogs(options);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { logs, total } }));
+            })
         },
-        "/debug/result": {
+
+        "/admin/logs/types": {
             OPTIONS: () => Res(null, { status: 204 }),
             GET: handler(async req => {
                 await requireAdmin(req);
-                const { results } = await db.getDebugResults();
+                const { types, error } = await db.getLogTypes();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: types }));
+            })
+        },
+
+        // --- ADMIN: SESSIONS ---
+        "/admin/sessions": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const options: any = {};
+                if (url.searchParams.get('exam_mode')) options.exam_mode = url.searchParams.get('exam_mode');
+                if (url.searchParams.get('status')) options.status = url.searchParams.get('status');
+                if (url.searchParams.get('user_id')) options.user_id = parseInt(url.searchParams.get('user_id')!);
+                if (url.searchParams.get('search')) options.search = url.searchParams.get('search');
+                if (url.searchParams.get('limit')) options.limit = parseInt(url.searchParams.get('limit')!);
+                if (url.searchParams.get('offset')) options.offset = parseInt(url.searchParams.get('offset')!);
+
+                const { sessions, total, error } = await db.getAllExamSessions(options);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { sessions, total } }));
+            })
+        },
+
+        "/admin/session/detail": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = url.searchParams.get('id');
+                if (!id) throw new HttpError("Session ID required", 400);
+
+                const { session, error } = await db.getExamSessionById(parseInt(id));
+                if (error) throw new HttpError(error, 500);
+                if (!session) throw new HttpError("Session not found", 404);
+
+                const { logs, error: logsError } = await db.getSessionLogs(parseInt(id));
+                if (logsError) throw new HttpError(logsError, 500);
+
+                return Res(JSON.stringify({ result: { session, logs } }));
+            })
+        },
+
+        // --- ADMIN: RESULTS ---
+        "/admin/results": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const options: any = {};
+                if (url.searchParams.get('exam_mode')) options.exam_mode = url.searchParams.get('exam_mode');
+                if (url.searchParams.get('college')) options.college = url.searchParams.get('college');
+                if (url.searchParams.get('branch')) options.branch = url.searchParams.get('branch');
+                if (url.searchParams.get('year')) options.year = parseInt(url.searchParams.get('year')!);
+                if (url.searchParams.get('level_id')) options.level_id = parseInt(url.searchParams.get('level_id')!);
+
+                const { results, error } = await db.getExamResults(options);
+                if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: results }));
-            }),
+            })
+        },
+
+        "/admin/results/grade": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const body = await parseJSON<any>(req);
+                const { session_id, question_id, is_correct } = body;
+                if (!session_id || !question_id) throw new HttpError("Missing required fields", 400);
+
+                const { success, error } = await db.gradeSubmission(session_id, question_id, is_correct);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { success } }));
+            })
+        },
+
+        "/admin/results/options": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { colleges, branches, years, levels, modes, error } = await db.getResultGroupOptions() as any;
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { colleges, branches, years, levels, modes } }));
+            })
+        },
+
+        // --- BATCH LOG SUBMISSION (for offline sync) ---
+        "/system/log/batch": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+
+                const { system } = await db.getSystemByCode((payload as any).name);
+                if (!system) throw new HttpError("System invalid", 404);
+
+                const body = await parseJSON<any>(req);
+                if (!body.logs || !Array.isArray(body.logs)) throw new HttpError("logs array required", 400);
+
+                const logsToCreate = body.logs.map((log: any) => ({
+                    exam_session_id: log.session_id || 0,
+                    user_id: system.assigned_to,
+                    system_code: system.code,
+                    log_type: log.type,
+                    data: log.data,
+                    timestamp: log.data?.timestamp
+                }));
+
+                const { created, error } = await db.batchCreateLogs(logsToCreate);
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { created } }), { status: 200 });
+            })
+        },
+
+        // --- QUESTION BY ID (for results inspection) ---
+        "/debug/question/get": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const id = url.searchParams.get('id');
+                if (!id) throw new HttpError("Question ID required", 400);
+
+                const { questions } = await db.getAllDebugQuestions();
+                const question = questions?.find((q: any) => q.id === parseInt(id));
+                if (!question) throw new HttpError("Question not found", 404);
+                return Res(JSON.stringify({ result: question }));
+            })
         },
 
         "/": Response.redirect("/login"),

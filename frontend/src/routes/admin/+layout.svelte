@@ -256,6 +256,22 @@
              <span class="truncate">Results</span>
            {/if}
         </a>
+
+        <a href="/admin/logs" 
+           class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent
+           {page.url.pathname.includes('/logs') 
+             ? 'bg-gray-900 text-white shadow-md' 
+             : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:border-gray-200'}
+           {isSidebarCollapsed ? 'justify-center px-2' : ''}"
+           title={isSidebarCollapsed ? "Logs" : ""}
+        >
+           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />
+           </svg>
+           {#if !isSidebarCollapsed}
+             <span class="truncate">Logs</span>
+           {/if}
+        </a>
       </nav>
 
       <div class="{isSidebarCollapsed ? 'items-center' : ''} p-4 border-t border-gray-200 bg-gray-50/50 flex flex-col gap-2">
@@ -385,6 +401,18 @@
                       <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
                    </svg>
                    Results
+                </a>
+
+                <a href="/admin/logs"
+                   onclick={() => isMobileMenuOpen = false} 
+                   class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent
+                   {page.url.pathname.includes('/logs') 
+                     ? 'bg-gray-900 text-white shadow-md' 
+                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:border-gray-200'}">
+                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />
+                   </svg>
+                   Logs
                 </a>
              </nav>
              <div class="p-4 border-t border-gray-200 bg-gray-50/50 mb-safe">

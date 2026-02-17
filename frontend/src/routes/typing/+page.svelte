@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import { api } from "$lib/api";
     import { goto } from "$app/navigation";
+    import ExamGuard from "$lib/components/ExamGuard.svelte";
 
     onMount(async () => {
         const token = localStorage.getItem("login_token") || "";
@@ -213,6 +214,7 @@
     });
 </script>
 
+<ExamGuard examMode={true} enableFullscreen={true} enableCopyPaste={true}>
 <div class="container">
     <!-- Header -->
     <header class="test-header">
@@ -291,3 +293,4 @@
         <button class="btn-restart" onclick={() => {}}>Re-Initialize</button>
     </div>
 </div>
+</ExamGuard>
