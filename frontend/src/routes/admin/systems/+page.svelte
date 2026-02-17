@@ -349,6 +349,7 @@
 
    async function handleStatusChange(system: any, newStatus: string) {
        if (isBulkManageMode) {
+           bulkData.status = newStatus;
            handleBulkUpdate({ status: newStatus });
            return;
        }
@@ -361,6 +362,7 @@
 
   async function handleTypeChange(system: any, newType: string) {
       if (isBulkManageMode) {
+          bulkData.exam_type = newType;
           handleBulkUpdate({ exam_type: newType });
           return;
       }
@@ -370,6 +372,21 @@
           await fetchSystems();
       } catch (e: any) {
           alert(`Error updating exam type: ${e.message}`);
+      }
+  }
+
+  async function handleLevelChange(system: any, newLevelId: number) {
+      if (isBulkManageMode) {
+          bulkData.assigned_level_id = newLevelId;
+          handleBulkUpdate({ assigned_level_id: newLevelId });
+          return;
+      }
+      try {
+          const token = localStorage.getItem("login_token");
+          await api(`/system?id=${system.id}`, "PUT", { assigned_level_id: newLevelId }, token || "");
+          await fetchSystems();
+      } catch (e: any) {
+          alert(`Error updating level: ${e.message}`);
       }
   }
     
@@ -695,7 +712,6 @@
                                      </Button>
                                  </div>
                              {:else if selectedSystem?.login_otp}
-                                <div class="flex items-center gap-4">
                                     <div class="relative">
                                         <button 
                                             onclick={() => isOtpVisible = !isOtpVisible}
@@ -705,33 +721,52 @@
                                             <span class="{isOtpVisible ? 'opacity-100' : 'opacity-0'} transition-opacity duration-200 font-bold">{selectedSystem?.login_otp}</span>
                                             <span class="absolute inset-0 flex items-center justify-center {isOtpVisible ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200 text-gray-500 font-bold">•••••</span>
                                         </button>
-                                        <div class="mt-2 text-center text-xs text-gray-500 font-medium uppercase tracking-wide">Click to {isOtpVisible ? 'hide' : 'reveal'}</div>
+
                                     </div>
-                                </div>
-                                <div class="mt-4">
-                                    <Button onclick={() => handleGenerateOTP(selectedSystem)} class="w-full">
-                                        <span class="flex items-center gap-2 justify-center">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                            </svg>
-                                            Generate New OTP
-                                        </span>
-                                    </Button>
-                                </div>
                             {:else}
                                  <div class="p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm border border-yellow-200">
-                                     No active OTP. Assign a user or generate one manually.
+                                     No active OTP. Assign a user via the "Assign" button above.
                                  </div>
-                                 <div class="mt-3">
-                                     <Button onclick={() => handleGenerateOTP(selectedSystem)}>
-                                         <span class="flex items-center gap-2">
-                                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                             </svg>
-                                             Generate New OTP
-                                         </span>
-                                     </Button>
-                                 </div>
+                            {/if}
+                        </div>
+
+                        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-6">
+                            <div>
+                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Mode</span>
+                                <div class="grid grid-cols-2 gap-3">
+                                    {#each ['debug', 'typing'] as type}
+                                        <button 
+                                            onclick={() => handleTypeChange(selectedSystem, type)}
+                                            class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
+                                            {!isBulkManageMode && selectedSystem?.exam_type === type 
+                                                ? 'bg-indigo-900 text-white border-indigo-900 ring-2 ring-offset-2 ring-indigo-900' 
+                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
+                                        >
+                                            {type === 'debug' ? 'Debug Protocol' : 'Typing Master'}
+                                        </button>
+                                    {/each}
+                                </div>
+                            </div>
+
+                            {#if isBulkManageMode || (selectedSystem?.exam_type === 'debug' || !selectedSystem?.exam_type)}
+                            <div>
+                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Level</span>
+                                <div class="space-y-3">
+                                    <select 
+                                        class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm font-medium focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-sm"
+                                        value={!isBulkManageMode ? selectedSystem?.assigned_level_id : bulkData.assigned_level_id}
+                                        onchange={(e) => handleLevelChange(selectedSystem, parseInt(e.currentTarget.value))}
+                                    >
+                                        <option value={null} disabled={!isBulkManageMode}>Select Level</option>
+                                        {#each debugLevels.toSorted((a, b) => (a.order_num ?? 0) - (b.order_num ?? 0)) as level}
+                                            <option value={level.id}>{level.name}</option>
+                                        {/each}
+                                    </select>
+                                    {#if debugLevels.length === 0}
+                                        <p class="text-[10px] text-amber-600 font-medium">No debug levels available.</p>
+                                    {/if}
+                                </div>
+                            </div>
                             {/if}
                         </div>
                     </div>
@@ -764,23 +799,6 @@
                                             </button>
                                         {/each}
                                     {/if}
-                                </div>
-                            </div>
-
-                            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                                 <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Mode</span>
-                                <div class="grid grid-cols-2 gap-3">
-                                    {#each ['debug', 'typing'] as type}
-                                        <button 
-                                            onclick={() => handleTypeChange(selectedSystem, type)}
-                                            class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
-                                            {!isBulkManageMode && selectedSystem?.exam_type === type 
-                                                ? 'bg-indigo-900 text-white border-indigo-900 ring-2 ring-offset-2 ring-indigo-900' 
-                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
-                                        >
-                                            {type === 'debug' ? 'Debug Protocol' : 'Typing Master'}
-                                        </button>
-                                    {/each}
                                 </div>
                             </div>
 
@@ -1054,7 +1072,7 @@
              <span class="text-sm font-medium text-gray-700 block mb-1.5">Assign Level <span class="text-red-500">*</span></span>
              <select bind:value={selectedLevelId} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" required>
                  <option value={null} disabled>Select a level...</option>
-                 {#each debugLevels.sort((a, b) => (a.order_num || a.order || 0) - (b.order_num || b.order || 0)) as level}
+                 {#each debugLevels.toSorted((a, b) => (a.order_num || a.order || 0) - (b.order_num || b.order || 0)) as level}
                      <option value={level.id}>{level.name} ({Math.floor((level.duration || 900) / 60)} min, {level.question_ids?.length || 0} questions)</option>
                  {/each}
              </select>

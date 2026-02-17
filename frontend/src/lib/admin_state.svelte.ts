@@ -27,7 +27,16 @@ export function updateSystem(id: number, data: any) {
 }
 
 export function addSystem(sys: any) {
-	systems.push(sys);
+	systems = [...systems, sys];
+}
+
+export function upsertSystem(id: number, data: any) {
+	const idx = systems.findIndex(s => s.id === id);
+	if (idx !== -1) {
+		systems[idx] = { ...systems[idx], ...data };
+	} else if (data) {
+		systems = [...systems, { id, ...data }];
+	}
 }
 
 export function removeSystem(id: number) {

@@ -34,8 +34,14 @@ export async function initDB() {
             description TEXT,
             code_snippet TEXT,
             difficulty TEXT,
+            question_type TEXT DEFAULT 'full_edit',
+            answer_meta TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`;
+
+        // Migration: add new columns if they don't exist
+        try { await db`ALTER TABLE debug_questions ADD COLUMN question_type TEXT DEFAULT 'full_edit'`; } catch { }
+        try { await db`ALTER TABLE debug_questions ADD COLUMN answer_meta TEXT`; } catch { }
 
         await db`CREATE TABLE IF NOT EXISTS debug_levels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +98,14 @@ export async function initDB() {
         } else {
             return { error: "unexpected error while initializing database" };
         }
+    }
+}
+
+export async function resetSystemsStatusOnStart() {
+    try {
+        await db`UPDATE systems SET status = 'offline' WHERE status != 'exam'`;
+    } catch (e) {
+        console.error("Failed to reset system statuses:", e);
     }
 }
 
@@ -347,23 +361,32 @@ export async function getSystemById(id: number) {
 export async function getAllDebugQuestions() {
     try {
         const questions = await db`SELECT * FROM debug_questions`;
+        // Parse answer_meta JSON
+        for (const q of questions) {
+            try { if (q.answer_meta) q.answer_meta = JSON.parse(q.answer_meta); } catch { q.answer_meta = null; }
+        }
         return { questions };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 
 export async function createDebugQuestion(data: any) {
     try {
-        await db`INSERT INTO debug_questions (title, description, code_snippet, difficulty) 
-            VALUES (${data.title}, ${data.description}, ${data.code_snippet}, ${data.difficulty})`;
+        const questionType = data.question_type || 'full_edit';
+        const answerMeta = data.answer_meta ? JSON.stringify(data.answer_meta) : null;
+        await db`INSERT INTO debug_questions (title, description, code_snippet, difficulty, question_type, answer_meta) 
+            VALUES (${data.title}, ${data.description}, ${data.code_snippet}, ${data.difficulty}, ${questionType}, ${answerMeta})`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 
 export async function updateDebugQuestion(id: number, data: any) {
     try {
+        const questionType = data.question_type || 'full_edit';
+        const answerMeta = data.answer_meta ? JSON.stringify(data.answer_meta) : null;
         await db`UPDATE debug_questions SET 
             title = ${data.title}, description = ${data.description}, 
-            code_snippet = ${data.code_snippet}, difficulty = ${data.difficulty} 
+            code_snippet = ${data.code_snippet}, difficulty = ${data.difficulty},
+            question_type = ${questionType}, answer_meta = ${answerMeta}
             WHERE id = ${id}`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }

@@ -1,7 +1,26 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import { api } from "$lib/api";
+    import { goto } from "$app/navigation";
 
-    onMount(() => {
+    onMount(async () => {
+        const token = localStorage.getItem("login_token") || "";
+        if (!token) {
+            goto("/login");
+            return;
+        }
+
+        try {
+            const system = await api("/system/status", "GET", null, token);
+            if (!system || !system.assigned_to || system.status === 'completed') {
+                goto("/thankyou");
+                return;
+            }
+        } catch (e) {
+            goto("/login");
+            return;
+        }
+
         // --- CONFIGURATION ---
         const TIME_LIMIT = 300; // 5 minutes in seconds
 

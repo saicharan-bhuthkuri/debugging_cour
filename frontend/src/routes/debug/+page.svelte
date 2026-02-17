@@ -3,6 +3,7 @@
     import { api } from "$lib/api";
     import { goto } from "$app/navigation";
     import { openDB } from "idb";
+    import CodeEditor from "$lib/components/CodeEditor.svelte";
     import "./debug.css";
 
     let questions: any[] = $state([]);
@@ -12,10 +13,16 @@
     let currentSystemCode = $state("");
     let loading = $state(true);
     let showSubmitDialog = $state(false);
+    let hasAutoTriggeredConfirm = $state(false);
     let runOutput = $state("");
     
-    // State Map: questionId -> { status: 'unvisited' | 'skipped' | 'hold' | 'submitted', answer: string }
-    let questionStates = $state<Record<number, { status: string; answer: string }>>({});
+    // State Map: questionId -> { status, answer, markedLines?, addedLines? }
+    let questionStates = $state<Record<number, {
+        status: string;
+        answer: string;
+        markedLines?: number[];
+        addedLines?: { afterLine: number; content: string }[];
+    }>>({});
     
     let dbPromise: Promise<any>;
     let timerInterval: any;
@@ -41,7 +48,20 @@
         const savedDuration = localStorage.getItem("exam_duration");
         if (savedDuration) timeRemaining = parseInt(savedDuration);
 
+        const token = localStorage.getItem("login_token") || "";
+        if (!token) {
+            goto("/login");
+            return;
+        }
+
         try {
+            // Verify System Assignment
+            const system = await api("/system/status", "GET", null, token);
+            if (!system || !system.assigned_to || system.status === 'completed') {
+                goto("/thankyou");
+                return;
+            }
+
             // Restore State
             const db = await dbPromise;
             const savedState = await db.get(STORE_STATE, "current_session");
@@ -82,7 +102,12 @@
                       const initialStates: Record<number, any> = {};
                       orderedQs.forEach(q => {
                           if (q && q.id) {
-                             initialStates[q.id] = { status: 'unvisited', answer: q.code_snippet || "" };
+                             initialStates[q.id] = {
+                                 status: 'unvisited',
+                                 answer: q.code_snippet || "",
+                                 markedLines: [],
+                                 addedLines: []
+                             };
                           }
                       });
                       
@@ -196,7 +221,19 @@
         const q = questions[currentIndex];
          if (q && questionStates[q.id]) {
             questionStates[q.id].status = 'submitted';
-            logAction("SUBMIT", { question_id: q.id, answer: questionStates[q.id].answer });
+            const logData: any = {
+                question_id: q.id,
+                answer: questionStates[q.id].answer,
+                question_type: q.question_type || 'full_edit'
+            };
+            // Include mode-specific data
+            if (q.question_type === 'find_buggy_line') {
+                logData.marked_lines = questionStates[q.id].markedLines || [];
+            }
+            if (q.question_type === 'add_lines') {
+                logData.added_lines = questionStates[q.id].addedLines || [];
+            }
+            logAction("SUBMIT", logData);
             saveState();
             if (currentIndex < questions.length - 1) next();
         }
@@ -211,14 +248,18 @@
     }
 
     async function finishExam(force = false) {
-        if (force) {
-            questions.forEach(q => {
-                if (questionStates[q.id] && questionStates[q.id].status === 'hold') {
-                    questionStates[q.id].status = 'submitted';
-                    logAction("AUTO_SUBMIT_HOLD", { question_id: q.id, answer: questionStates[q.id].answer });
-                }
-            });
-        }
+        // Auto-submit ALL unsubmitted questions on final finish (timeout or confirm)
+        questions.forEach(q => {
+            const state = questionStates[q.id];
+            if (state && state.status !== 'submitted') {
+                state.status = 'submitted';
+                logAction(force ? "AUTO_SUBMIT_TIMEOUT" : "AUTO_SUBMIT_FINAL", { 
+                    question_id: q.id, 
+                    answer: state.answer,
+                    reason: state.status // skipped, hold, or unvisited
+                });
+            }
+        });
 
         logAction("EXAM_FINISH", { reason: force ? "TIMEOUT" : "USER_INITIATED" });
         
@@ -234,10 +275,42 @@
         goto("/thankyou"); 
     }
 
+    // Auto-trigger final submit dialog when everything is submitted
+    $effect(() => {
+        if (questions.length > 0 && stats.submitted === questions.length) {
+            if (!hasAutoTriggeredConfirm && !showSubmitDialog) {
+                hasAutoTriggeredConfirm = true;
+                showSubmitDialog = true;
+            }
+        } else {
+            hasAutoTriggeredConfirm = false;
+        }
+    });
+
+    // CodeEditor callbacks
+    function handleCodeChange(value: string) {
+        if (currentQ && questionStates[currentQ.id]) {
+            questionStates[currentQ.id].answer = value;
+        }
+    }
+
+    function handleMarkedLines(lines: number[]) {
+        if (currentQ && questionStates[currentQ.id]) {
+            questionStates[currentQ.id].markedLines = lines;
+        }
+    }
+
+    function handleAddedLines(data: { afterLine: number; content: string }[]) {
+        if (currentQ && questionStates[currentQ.id]) {
+            questionStates[currentQ.id].addedLines = data;
+        }
+    }
+
     // Computed
     let currentQ = $derived(questions[currentIndex]);
     let currentState = $derived(currentQ ? questionStates[currentQ.id] : null);
     let isLastQuestion = $derived(currentIndex === questions.length - 1);
+    let currentQuestionType = $derived((currentQ?.question_type || 'full_edit') as 'full_edit' | 'find_buggy_line' | 'add_lines' | 'missing_lines');
 
     function formatTime(sec: number) {
         const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -254,6 +327,29 @@
             default: return 'bg-white/5 border-white/10 text-white/50';
         }
     }
+
+    function getQTypeLabel(type: string) {
+        switch(type) {
+            case 'full_edit': return 'EDIT';
+            case 'find_buggy_line': return 'FIND BUG';
+            case 'add_lines': return 'ADD LINE';
+            case 'missing_lines': return 'FILL IN';
+            default: return 'EDIT';
+        }
+    }
+
+    function getQTypeColor(type: string) {
+        switch(type) {
+            case 'full_edit': return 'type-edit';
+            case 'find_buggy_line': return 'type-buggy';
+            case 'add_lines': return 'type-add';
+            case 'missing_lines': return 'type-missing';
+            default: return 'type-edit';
+        }
+    }
+
+    // Unique key for editor re-mounting on question change 
+    let editorKey = $derived(currentQ ? `editor-${currentQ.id}` : 'editor-none');
 
     // Stats derived
     let stats = $derived({
@@ -279,9 +375,17 @@
             <span class="status-badge {getStatusColor(currentState?.status || 'unvisited')}">
                  {currentState?.status?.toUpperCase() || "UNVISITED"}
             </span>
+            {#if currentQ}
+                <span class="question-type-badge {getQTypeColor(currentQ.question_type || 'full_edit')}">
+                    {getQTypeLabel(currentQ.question_type || 'full_edit')}
+                </span>
+            {/if}
         </div>
         <div class="header-right">
             <button class="btn-finish-header" onclick={confirmFinish}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="margin-right: 4px;">
+                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
                 Final Submit
             </button>
             <div class="timer {timeRemaining < 60 ? 'danger' : ''}">
@@ -302,6 +406,30 @@
                 <div class="desc">
                     {@html currentQ?.description}
                 </div>
+                
+                {#if currentQ?.question_type && currentQ.question_type !== 'full_edit'}
+                    <div class="question-type-hint">
+                        {#if currentQ.question_type === 'find_buggy_line'}
+                            <div class="hint-icon">🐛</div>
+                            <div>
+                                <strong>Find the Bug</strong>
+                                <p>Click on the lines you think contain bugs to mark them. Click again to unmark.</p>
+                            </div>
+                        {:else if currentQ.question_type === 'add_lines'}
+                            <div class="hint-icon">➕</div>
+                            <div>
+                                <strong>Add Missing Lines</strong>
+                                <p>Right-click on a line to insert a new editable line after it. Only added lines are editable.</p>
+                            </div>
+                        {:else if currentQ.question_type === 'missing_lines'}
+                            <div class="hint-icon">📝</div>
+                            <div>
+                                <strong>Fill in the Blanks</strong>
+                                <p>Only the highlighted lines are editable. Fill in the correct code for each blank line.</p>
+                            </div>
+                        {/if}
+                    </div>
+                {/if}
             </div>
 
             <!-- Question Grid -->
@@ -312,6 +440,7 @@
                         <button 
                             class="grid-item {getStatusColor(questionStates[q.id]?.status)} {i === currentIndex ? 'active-q' : ''}"
                             onclick={() => gotoQuestion(i)}
+                            title="{getQTypeLabel(q.question_type || 'full_edit')}"
                         >
                             {i + 1}
                         </button>
@@ -343,11 +472,17 @@
             </div>
 
             {#if currentQ && questionStates[currentQ.id]}
-                <textarea 
-                    class="code-editor"
-                    spellcheck="false"
-                    bind:value={questionStates[currentQ.id].answer}
-                ></textarea>
+                {#key editorKey}
+                    <CodeEditor
+                        code={questionStates[currentQ.id].answer}
+                        mode={currentQuestionType}
+                        language="c"
+                        answerMeta={currentQ.answer_meta}
+                        onchange={handleCodeChange}
+                        onmarkedlines={handleMarkedLines}
+                        onaddedlines={handleAddedLines}
+                    />
+                {/key}
             {/if}
 
             <!-- Bottom Panel: Output + Actions -->
@@ -359,12 +494,16 @@
                 {/if}
 
                 <div class="action-bar">
-                    <button class="btn-run" onclick={handleRun}>▶ Run</button>
+                    {#if currentQuestionType === 'full_edit'}
+                        <button class="btn-run" onclick={handleRun}>▶ Run</button>
+                    {/if}
+                    {#if currentQuestionType === 'find_buggy_line' && currentState?.markedLines}
+                        <span class="marked-lines-status">
+                            🐛 {currentState.markedLines.length} line{currentState.markedLines.length !== 1 ? 's' : ''} marked
+                        </span>
+                    {/if}
                     <div class="spacer"></div>
                     <button class="btn-submit" onclick={handleSubmit}>✓ Submit Answer</button>
-                    {#if isLastQuestion}
-                        <button class="btn-final-submit" onclick={confirmFinish}>⬡ Final Submit</button>
-                    {/if}
                 </div>
             </div>
         </section>

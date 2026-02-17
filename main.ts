@@ -7,6 +7,14 @@ import { wsManager, type WSData } from "./ws_server";
 
 await db.initDB();
 
+// Reset all systems to offline on start, except if they are in exam mode
+try {
+    await db.resetSystemsStatusOnStart();
+    console.log("Systems status normalized for startup.");
+} catch (e) {
+    console.error("Failed to normalize systems status:", e);
+}
+
 export type WithID<T> = T & { id: number };
 
 export interface User {
@@ -250,6 +258,20 @@ const server = Bun.serve<WSData>({
             }),
         },
 
+        "/system/status": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+
+                const { system } = await db.getSystemByCode((payload as any).name);
+                if (!system) throw new HttpError("System invalid", 404);
+
+                return Res(JSON.stringify({ result: system }), { status: 200 });
+            })
+        },
+
         "/system/verify": {
             OPTIONS: () => Res(null, { status: 204 }),
             POST: handler(async req => {
@@ -334,6 +356,7 @@ const server = Bun.serve<WSData>({
 
                 await db.updateSystem(system.id, {
                     status: 'completed',
+                    assigned_to: null,
                     login_otp: newOtp
                 });
 
@@ -510,12 +533,33 @@ const server = Bun.serve<WSData>({
                     throw new HttpError("System is in EXAM mode. Edits are restricted.", 403);
                 }
 
+                // Special handling: setting status to 'online' from completed/booked
+                // First reset to offline, then check if system is actually connected
+                if (data.status === 'online' && currentSystem &&
+                    (currentSystem.status === 'completed' || currentSystem.status === 'booked')) {
+
+                    // Step 1: Reset to offline (clear assignment if coming from completed)
+                    const resetData: any = { status: 'offline' };
+                    if (currentSystem.status === 'completed') {
+                        resetData.assigned_to = null;
+                        resetData.login_otp = null;
+                    }
+                    await db.updateSystem(id, resetData);
+                    await notifySystemUpdate(id);
+
+                    // Step 2: Check if system has an active WS connection
+                    if (wsManager.isSystemConnected(id)) {
+                        // System is connected — promote to online
+                        await db.updateSystem(id, { status: 'online' });
+                        await notifySystemUpdate(id);
+                    }
+                    // If not connected, it stays offline
+
+                    return Res(JSON.stringify({ result: "Updated" }));
+                }
+
                 const { error } = await db.updateSystem(id, data);
                 if (error) throw new HttpError(error, 500);
-
-                // Fetch updated system to send full details
-                const { systems } = await db.getAllSystems();
-                const updatedSystem = systems?.find((s: any) => s.id === id);
 
                 // Broadcast to admins & system
                 await notifySystemUpdate(id);

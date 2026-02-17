@@ -118,7 +118,7 @@ export class WebSocketManager {
 
 	// WS Handler: Close
 	public async close(ws: ServerWebSocket<WSData>) {
-		console.log(`Client disconnected: ${ws.data.role}`);
+		console.log(`Client disconnected: ${ws.data.role} (${ws.data.name})`);
 
 		if (ws.data.role === "system") {
 			const current = this.connectedSystems.get(ws.data.id);
@@ -129,21 +129,18 @@ export class WebSocketManager {
 			// Check if we should mark as offline
 			const { system } = await db.getSystemById(ws.data.id);
 			if (system && system.status !== 'exam' && system.status !== 'booked' && system.status !== 'completed') {
-				// Update DB
+				// Update DB to offline
 				await db.updateSystem(ws.data.id, { status: "offline" });
-				// Broadcast offline to ALL
-				this.broadcastAll({ type: "system_offline", id: ws.data.id });
-			} else {
-				// If exam/booked, we don't change status to offline.
-				// But we typically want to know if they disconnected?
-				// For now, user request is paramount: "exam mode should stay".
-				// We do NOT broadcast system_offline if in exam mode?
-				// Or we broadcast it but UI keeps it as 'exam' status?
-				// If we don't broadcast offline, Admin thinks it's connected.
-				// If Admin tries to interact, it might fail? 
-				// But the requirement is about the STATUS field.
-				// Status 'exam' implies it's busy.
+
+				// Re-fetch for broadcast
+				const { system: updated } = await db.getSystemById(ws.data.id);
+				this.broadcastAdmins({
+					type: "system_offline",
+					id: ws.data.id,
+					data: updated || { ...system, status: "offline" }
+				});
 			}
+			// For exam/booked/completed — status stays, no broadcast needed
 
 		} else if (ws.data.role === "admin" || ws.data.role === "superadmin") {
 			this.connectedAdmins.delete(ws);

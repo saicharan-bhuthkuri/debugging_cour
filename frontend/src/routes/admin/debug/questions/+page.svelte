@@ -12,27 +12,68 @@
   let isAddModalOpen = $state(false);
   let isEditModalOpen = $state(false);
   let isSubmitting = $state(false);
+  let isPreviewOpen = $state(false);
+  let previewQuestion = $state<any>(null);
 
   // Filters
   let searchQuery = $state("");
   let difficultyFilter = $state("all");
+  let typeFilter = $state("all");
+
+  const QUESTION_TYPES = [
+    { value: "full_edit", label: "Full Edit", desc: "User can edit the entire code", color: "cyan" },
+    { value: "find_buggy_line", label: "Find Buggy Line", desc: "User marks lines as buggy", color: "red" },
+    { value: "add_lines", label: "Add Lines", desc: "User adds new lines via context menu", color: "green" },
+    { value: "missing_lines", label: "Missing Lines", desc: "Only blank lines are editable", color: "yellow" },
+  ];
 
   // Form State
   let newQuestion = $state({
       title: "",
       description: "",
       code_snippet: "",
-      difficulty: "easy"
+      difficulty: "easy",
+      question_type: "full_edit",
+      answer_meta: null as any
   });
 
   let editingQuestion = $state<any>(null);
+
+  // For buggy line configuration
+  let buggyLinesInput = $state("");
+  let editBuggyLinesInput = $state("");
+  
+  // For missing lines configuration
+  let missingLinesInput = $state("");
+  let editMissingLinesInput = $state("");
 
   // Derived
   let filteredQuestions = $derived(questions.filter(q => {
     const matchesSearch = q.title.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDifficulty = difficultyFilter === "all" || q.difficulty === difficultyFilter;
-    return matchesSearch && matchesDifficulty;
+    const matchesType = typeFilter === "all" || q.question_type === typeFilter;
+    return matchesSearch && matchesDifficulty && matchesType;
   }));
+
+  function getCodeLines(code: string) {
+    return code ? code.split('\n') : [];
+  }
+
+  function parseLineNumbers(input: string): number[] {
+    return input.split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(n => !isNaN(n) && n > 0);
+  }
+
+  function buildAnswerMeta(type: string, linesInput: string): any {
+    if (type === 'find_buggy_line') {
+      return { buggy_lines: parseLineNumbers(linesInput) };
+    }
+    if (type === 'missing_lines') {
+      return { editable_lines: parseLineNumbers(linesInput) };
+    }
+    return null;
+  }
 
   async function fetchQuestions() {
       loading = true;
@@ -46,13 +87,8 @@
           else questions = [];
       } catch (e: any) {
           error = e.message;
-          // Mock data
           if (questions.length === 0) {
-              questions = [
-                  { id: 1, title: "Infinite Loop Fix", description: "Fix the loop condition", difficulty: "easy" },
-                  { id: 2, title: "Null Pointer Exception", description: "Handle potential null value", difficulty: "medium" },
-                  { id: 3, title: "Race Condition", description: "Add mutex locks", difficulty: "hard" },
-              ];
+              questions = [];
           }
       } finally {
           loading = false;
@@ -63,9 +99,16 @@
       isSubmitting = true;
       try {
           const token = localStorage.getItem("login_token");
-          await api("/debug/question", "POST", newQuestion, token || "");
+          const payload = {
+              ...newQuestion,
+              answer_meta: buildAnswerMeta(newQuestion.question_type, 
+                newQuestion.question_type === 'find_buggy_line' ? buggyLinesInput : missingLinesInput)
+          };
+          await api("/debug/question", "POST", payload, token || "");
           isAddModalOpen = false;
-          newQuestion = { title: "", description: "", code_snippet: "", difficulty: "easy" };
+          newQuestion = { title: "", description: "", code_snippet: "", difficulty: "easy", question_type: "full_edit", answer_meta: null };
+          buggyLinesInput = "";
+          missingLinesInput = "";
           fetchQuestions();
       } catch (e: any) {
           alert(`Error creating question: ${e.message}`);
@@ -76,6 +119,17 @@
 
   function openEditModal(question: any) {
       editingQuestion = { ...question };
+      // Populate line inputs from answer_meta
+      if (question.answer_meta?.buggy_lines) {
+          editBuggyLinesInput = question.answer_meta.buggy_lines.join(', ');
+      } else {
+          editBuggyLinesInput = "";
+      }
+      if (question.answer_meta?.editable_lines) {
+          editMissingLinesInput = question.answer_meta.editable_lines.join(', ');
+      } else {
+          editMissingLinesInput = "";
+      }
       isEditModalOpen = true;
   }
 
@@ -84,8 +138,12 @@
       isSubmitting = true;
       try {
           const token = localStorage.getItem("login_token");
-          // PUT body expects id too
-          await api(`/debug/question?id=${editingQuestion.id}`, "PUT", editingQuestion, token || "");
+          const payload = {
+              ...editingQuestion,
+              answer_meta: buildAnswerMeta(editingQuestion.question_type,
+                editingQuestion.question_type === 'find_buggy_line' ? editBuggyLinesInput : editMissingLinesInput)
+          };
+          await api(`/debug/question?id=${editingQuestion.id}`, "PUT", payload, token || "");
           isEditModalOpen = false;
           fetchQuestions();
       } catch (e: any) {
@@ -106,10 +164,27 @@
       }
   }
 
+  function openPreview(question: any) {
+      previewQuestion = question;
+      isPreviewOpen = true;
+  }
+
+  function getTypeInfo(type: string) {
+      return QUESTION_TYPES.find(t => t.value === type) || QUESTION_TYPES[0];
+  }
+
   onMount(() => {
       fetchQuestions();
   });
 </script>
+
+{#snippet typeCell(row: any)}
+  {@const info = getTypeInfo(row.question_type || 'full_edit')}
+  {@const colorMap = { cyan: 'bg-cyan-50 text-cyan-700 border-cyan-200', red: 'bg-red-50 text-red-700 border-red-200', green: 'bg-green-50 text-green-700 border-green-200', yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200' }}
+  <span class="text-xs px-2 py-1 rounded-full border font-mono font-semibold tracking-wider {colorMap[info.color as keyof typeof colorMap] || 'bg-gray-100'}">
+    {info.label}
+  </span>
+{/snippet}
 
 {#snippet difficultyCell(row: any)}
   {@const colors = {
@@ -122,8 +197,30 @@
   </span>
 {/snippet}
 
+{#snippet metaCell(row: any)}
+  <div class="text-xs text-gray-500 font-mono">
+    {#if row.question_type === 'find_buggy_line' && row.answer_meta?.buggy_lines}
+      <span class="text-red-500">Lines: {row.answer_meta.buggy_lines.join(', ')}</span>
+    {:else if row.question_type === 'missing_lines' && row.answer_meta?.editable_lines}
+      <span class="text-yellow-600">Editable: {row.answer_meta.editable_lines.join(', ')}</span>
+    {:else if row.question_type === 'full_edit'}
+      <span class="text-gray-400">—</span>
+    {:else if row.question_type === 'add_lines'}
+      <span class="text-green-500">Context menu</span>
+    {:else}
+      <span class="text-gray-400">—</span>
+    {/if}
+  </div>
+{/snippet}
+
 {#snippet actionCell(row: any)}
   <div class="flex items-center gap-2">
+    <button onclick={() => openPreview(row)} class="text-purple-600 hover:bg-purple-50 p-1.5 rounded-full transition-colors" title="Preview">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+        <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" />
+      </svg>
+    </button>
     <button onclick={() => openEditModal(row)} class="text-blue-600 hover:bg-blue-50 p-1.5 rounded-full transition-colors" title="Edit">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
         <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
@@ -137,11 +234,30 @@
   </div>
 {/snippet}
 
+{#snippet questionTypeSelector(value: string, onchange: (v: string) => void)}
+  <div class="w-full">
+    <label class="block text-sm font-medium text-gray-700 mb-2">Question Type</label>
+    <div class="grid grid-cols-2 gap-2">
+      {#each QUESTION_TYPES as type}
+        {@const isSelected = value === type.value}
+        {@const borderColors = { cyan: 'border-cyan-400 bg-cyan-50', red: 'border-red-400 bg-red-50', green: 'border-green-400 bg-green-50', yellow: 'border-yellow-400 bg-yellow-50' }}
+        <button
+          type="button"
+          class="p-3 rounded-lg border-2 text-left transition-all {isSelected ? (borderColors[type.color as keyof typeof borderColors] || 'border-gray-400') : 'border-gray-200 hover:border-gray-300'}"
+          onclick={() => onchange(type.value)}
+        >
+          <div class="font-semibold text-sm text-gray-900">{type.label}</div>
+          <div class="text-xs text-gray-500 mt-0.5">{type.desc}</div>
+        </button>
+      {/each}
+    </div>
+  </div>
+{/snippet}
+
 <div class="space-y-6">
   <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
     <h1 class="text-3xl font-bold text-gray-900">Debug Questions</h1>
     <div class="flex gap-2">
-        <!-- Optional: Link to Levels -->
         <a href="/admin/debug/levels" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2">
             Switch to Levels
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -171,6 +287,14 @@
           <option value="hard">Hard</option>
        </select>
     </div>
+    <div class="w-full md:w-48">
+       <select bind:value={typeFilter} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+          <option value="all">All Types</option>
+          {#each QUESTION_TYPES as type}
+            <option value={type.value}>{type.label}</option>
+          {/each}
+       </select>
+    </div>
   </div>
 
   {#if loading}
@@ -181,8 +305,9 @@
         data={filteredQuestions} 
         columns={[
           { key: 'title', label: 'Title' },
+          { key: 'question_type', label: 'Type', render: typeCell },
           { key: 'difficulty', label: 'Difficulty', render: difficultyCell },
-          { key: 'description', label: 'Description' }, // Maybe truncate this
+          { key: 'answer_meta', label: 'Config', render: metaCell },
           { key: 'actions', label: 'Actions', render: actionCell }
         ]} 
       />
@@ -194,16 +319,21 @@
     <form onsubmit={(e) => { e.preventDefault(); handleAddQuestion(); }} class="space-y-4">
       <Input label="Title" bind:value={newQuestion.title} placeholder="e.g. Infinite Loop" required />
       
-      <div class="w-full">
-         <label class="flex flex-col gap-1.5 w-full">
-             <span class="text-sm font-medium text-gray-700">Difficulty</span>
-             <select bind:value={newQuestion.difficulty} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
-                 <option value="easy">Easy</option>
-                 <option value="medium">Medium</option>
-                 <option value="hard">Hard</option>
-             </select>
-         </label>
+      <div class="flex gap-4">
+        <div class="w-1/2">
+            <label class="flex flex-col gap-1.5 w-full">
+                <span class="text-sm font-medium text-gray-700">Difficulty</span>
+                <select bind:value={newQuestion.difficulty} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                </select>
+            </label>
+        </div>
       </div>
+
+      <!-- Question Type Selector -->
+      {@render questionTypeSelector(newQuestion.question_type, (v) => newQuestion.question_type = v)}
       
       <div class="w-full">
          <label class="flex flex-col gap-1.5 w-full">
@@ -215,9 +345,45 @@
        <div class="w-full">
          <label class="flex flex-col gap-1.5 w-full">
              <span class="text-sm font-medium text-gray-700">Code Snippet</span>
-             <textarea bind:value={newQuestion.code_snippet} rows="6" class="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" placeholder="// Code goes here..."></textarea>
+             <textarea bind:value={newQuestion.code_snippet} rows="8" class="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" placeholder="// Code goes here..."></textarea>
          </label>
+         {#if newQuestion.code_snippet}
+           <div class="text-xs text-gray-400 mt-1 font-mono">
+             {getCodeLines(newQuestion.code_snippet).length} lines
+           </div>
+         {/if}
       </div>
+
+      <!-- Type-specific configuration -->
+      {#if newQuestion.question_type === 'find_buggy_line'}
+        <div class="w-full p-4 bg-red-50 rounded-lg border border-red-200">
+          <label class="flex flex-col gap-1.5">
+            <span class="text-sm font-medium text-red-700">🐛 Correct Buggy Lines (Answer Key)</span>
+            <span class="text-xs text-red-500">Enter the line numbers that contain bugs (comma-separated). These are the correct answers.</span>
+            <input bind:value={buggyLinesInput} class="w-full px-3 py-2 bg-white border border-red-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-400" placeholder="e.g. 3, 7, 12" />
+          </label>
+        </div>
+      {/if}
+
+      {#if newQuestion.question_type === 'missing_lines'}
+        <div class="w-full p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+          <label class="flex flex-col gap-1.5">
+            <span class="text-sm font-medium text-yellow-700">📝 Editable Line Numbers</span>
+            <span class="text-xs text-yellow-600">Enter the line numbers that should be editable (the "missing" lines, comma-separated). Other lines will be read-only.</span>
+            <input bind:value={missingLinesInput} class="w-full px-3 py-2 bg-white border border-yellow-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" placeholder="e.g. 4, 8, 15" />
+          </label>
+        </div>
+      {/if}
+
+      {#if newQuestion.question_type === 'add_lines'}
+        <div class="w-full p-4 bg-green-50 rounded-lg border border-green-200">
+          <div class="text-sm font-medium text-green-700 flex items-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Lines Mode
+          </div>
+          <p class="text-xs text-green-600 mt-1">Students will see the code as read-only and can right-click to insert new editable lines. No additional configuration needed.</p>
+        </div>
+      {/if}
 
       <div class="pt-4 flex justify-end gap-3">
         <Button variant="secondary" onclick={() => isAddModalOpen = false}>Cancel</Button>
@@ -228,22 +394,27 @@
     </form>
   </Modal>
 
-  <!-- Edit Question Modal - Similar to Add -->
+  <!-- Edit Question Modal -->
   <Modal isOpen={isEditModalOpen} onClose={() => isEditModalOpen = false} title="Edit Question">
       {#if editingQuestion}
         <form onsubmit={(e) => { e.preventDefault(); handleUpdateQuestion(); }} class="space-y-4">
         <Input label="Title" bind:value={editingQuestion.title} required />
         
-        <div class="w-full">
-            <label class="flex flex-col gap-1.5 w-full">
-                <span class="text-sm font-medium text-gray-700">Difficulty</span>
-                <select bind:value={editingQuestion.difficulty} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
-                    <option value="easy">Easy</option>
-                    <option value="medium">Medium</option>
-                    <option value="hard">Hard</option>
-                </select>
-            </label>
+        <div class="flex gap-4">
+          <div class="w-1/2">
+              <label class="flex flex-col gap-1.5 w-full">
+                  <span class="text-sm font-medium text-gray-700">Difficulty</span>
+                  <select bind:value={editingQuestion.difficulty} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                  </select>
+              </label>
+          </div>
         </div>
+
+        <!-- Question Type Selector -->
+        {@render questionTypeSelector(editingQuestion.question_type || 'full_edit', (v) => editingQuestion.question_type = v)}
         
         <div class="w-full">
             <label class="flex flex-col gap-1.5 w-full">
@@ -255,9 +426,45 @@
         <div class="w-full">
             <label class="flex flex-col gap-1.5 w-full">
                 <span class="text-sm font-medium text-gray-700">Code Snippet</span>
-                <textarea bind:value={editingQuestion.code_snippet} rows="6" class="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"></textarea>
+                <textarea bind:value={editingQuestion.code_snippet} rows="8" class="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"></textarea>
             </label>
+            {#if editingQuestion.code_snippet}
+              <div class="text-xs text-gray-400 mt-1 font-mono">
+                {getCodeLines(editingQuestion.code_snippet).length} lines
+              </div>
+            {/if}
         </div>
+
+        <!-- Type-specific configuration -->
+        {#if editingQuestion.question_type === 'find_buggy_line'}
+          <div class="w-full p-4 bg-red-50 rounded-lg border border-red-200">
+            <label class="flex flex-col gap-1.5">
+              <span class="text-sm font-medium text-red-700">🐛 Correct Buggy Lines (Answer Key)</span>
+              <span class="text-xs text-red-500">Enter the line numbers that contain bugs (comma-separated)</span>
+              <input bind:value={editBuggyLinesInput} class="w-full px-3 py-2 bg-white border border-red-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-400" placeholder="e.g. 3, 7, 12" />
+            </label>
+          </div>
+        {/if}
+
+        {#if editingQuestion.question_type === 'missing_lines'}
+          <div class="w-full p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+            <label class="flex flex-col gap-1.5">
+              <span class="text-sm font-medium text-yellow-700">📝 Editable Line Numbers</span>
+              <span class="text-xs text-yellow-600">Enter the line numbers that should be editable (comma-separated)</span>
+              <input bind:value={editMissingLinesInput} class="w-full px-3 py-2 bg-white border border-yellow-300 rounded-lg text-gray-900 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" placeholder="e.g. 4, 8, 15" />
+            </label>
+          </div>
+        {/if}
+
+        {#if editingQuestion.question_type === 'add_lines'}
+          <div class="w-full p-4 bg-green-50 rounded-lg border border-green-200">
+            <div class="text-sm font-medium text-green-700 flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Lines Mode
+            </div>
+            <p class="text-xs text-green-600 mt-1">Students will right-click to insert new editable lines.</p>
+          </div>
+        {/if}
 
         <div class="pt-4 flex justify-end gap-3">
             <Button variant="secondary" onclick={() => isEditModalOpen = false}>Cancel</Button>
@@ -267,5 +474,33 @@
         </div>
         </form>
       {/if}
+  </Modal>
+
+  <!-- Preview Modal -->
+  <Modal isOpen={isPreviewOpen} onClose={() => isPreviewOpen = false} title="Question Preview">
+    {#if previewQuestion}
+      {@const info = getTypeInfo(previewQuestion.question_type || 'full_edit')}
+      {@const colorMap = { cyan: 'bg-cyan-50 text-cyan-700 border-cyan-200', red: 'bg-red-50 text-red-700 border-red-200', green: 'bg-green-50 text-green-700 border-green-200', yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200' }}
+      <div class="space-y-4">
+        <div class="flex items-center gap-3">
+          <h3 class="text-lg font-bold text-gray-900">{previewQuestion.title}</h3>
+          <span class="text-xs px-2 py-1 rounded-full border font-mono font-semibold {colorMap[info.color as keyof typeof colorMap]}">{info.label}</span>
+        </div>
+        <p class="text-sm text-gray-600">{previewQuestion.description}</p>
+        
+        <div class="relative">
+          <div class="text-xs font-mono text-gray-500 mb-2">Code Preview:</div>
+          <div class="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm font-mono text-gray-300 leading-relaxed">{#each getCodeLines(previewQuestion.code_snippet || '') as line, i}<div class="flex gap-3 hover:bg-white/5 px-2 py-0.5 rounded {previewQuestion.answer_meta?.buggy_lines?.includes(i+1) ? 'bg-red-500/10 border-l-2 border-red-500' : ''} {previewQuestion.answer_meta?.editable_lines?.includes(i+1) ? 'bg-yellow-500/10 border-l-2 border-yellow-500' : ''}"><span class="text-gray-600 select-none w-6 text-right">{i+1}</span><span>{line || ' '}</span></div>{/each}</pre>
+          </div>
+        </div>
+
+        {#if previewQuestion.answer_meta}
+          <div class="text-xs font-mono text-gray-500 p-3 bg-gray-50 rounded-lg border">
+            <strong>Answer Meta:</strong> {JSON.stringify(previewQuestion.answer_meta)}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </Modal>
 </div>

@@ -79,21 +79,22 @@
              if (msg.type === "admin_count") {
                  adminState.setAdminCount(msg.count);
              } else if (msg.type === "system_online") {
-                 const systems = adminState.getSystems();
-                 const existing = systems.find((s: any) => s.id === msg.id);
-                 if (existing) {
-                     adminState.updateSystem(msg.id, { status: "online", ...msg.data }); // Merge new data just in case
-                 } else if (msg.data) {
-                     adminState.addSystem({ ...msg.data, status: "online" });
+                 // System came online — upsert to handle both new and existing
+                 if (msg.data) {
+                     adminState.upsertSystem(msg.id, msg.data);
+                 } else {
+                     adminState.updateSystem(msg.id, { status: "online" });
                  }
              } else if (msg.type === "system_offline") {
-                 adminState.updateSystem(msg.id, { status: "offline" });
-             } else if (msg.type === "system_updated") {
-                 // Check if it exists, if not add it (maybe it was just created?) 
-                 // But typically specific create event or refresh handle creation.
-                 // msg.data contains full system object usually
                  if (msg.data) {
-                    adminState.updateSystem(msg.id, msg.data);
+                     adminState.upsertSystem(msg.id, msg.data);
+                 } else {
+                     adminState.updateSystem(msg.id, { status: "offline" });
+                 }
+             } else if (msg.type === "system_updated") {
+                 // Full system update — upsert to handle edge cases
+                 if (msg.data) {
+                     adminState.upsertSystem(msg.id, msg.data);
                  }
              } else if (msg.type === "system_deleted") {
                  adminState.removeSystem(msg.id);
