@@ -16,6 +16,8 @@
     let showSubmitDialog = $state(false);
     let hasAutoTriggeredConfirm = $state(false);
     let runOutput = $state("");
+    let runResults = $state<any[]>([]);
+    let isRunning = $state(false);
     
     // State Map: questionId -> { status, answer, markedLines?, addedLines? }
     let questionStates = $state<Record<number, {
@@ -215,6 +217,7 @@
         if (index >= 0 && index < questions.length) {
             currentIndex = index;
             runOutput = ""; // Clear output on navigation
+            runResults = [];
             if (questions[index] && questions[index].id) {
                 // logAction("NAVIGATE", { question_id: questions[index].id, from: currentIndex });
             }
@@ -230,11 +233,41 @@
     }
 
     // Actions
-    function handleRun() {
+    async function handleRun() {
         if (currentQ && questionStates[currentQ.id]) {
-            logAction("RUN_CODE", { question_id: currentQ.id, code: questionStates[currentQ.id].answer });
-            // Simulate run output
-            runOutput = `> Running solution for Q${currentIndex + 1}...\n> Compilation successful.\n> Output: [Test results will appear here]`;
+            isRunning = true;
+            runResults = [];
+            runOutput = "Compiling and running tests...";
+            
+            try {
+                const token = localStorage.getItem("login_token") || "";
+                const res = await api("/debug/run", "POST", {
+                    source_code: questionStates[currentQ.id].answer,
+                    question_id: currentQ.id
+                }, token);
+                
+                if (res && res.results) {
+                    runResults = res.results;
+                    const passed = runResults.filter(r => r.pass).length;
+                    runOutput = `Result: ${passed}/${runResults.length} test cases passed.`;
+                    
+                    logAction("RUN_CODE", { 
+                        question_id: currentQ.id, 
+                        code: questionStates[currentQ.id].answer,
+                        passed,
+                        total: runResults.length
+                    });
+                } else if (res && res.message) {
+                    runOutput = res.message;
+                } else {
+                    runOutput = "No test cases configured.";
+                }
+            } catch (e: any) {
+                console.error("Run fail", e);
+                runOutput = "Error: " + (e.message || "Execution failed");
+            } finally {
+                isRunning = false;
+            }
         }
     }
 
@@ -543,16 +576,61 @@
 
             <!-- Bottom Panel: Output + Actions -->
             <div class="bottom-panel">
-                {#if runOutput}
-                    <div class="output-area has-output">
-                        {runOutput}
+                {#if runOutput || runResults.length > 0}
+                    <div class="output-area {runResults.length > 0 ? 'has-results' : ''}">
+                        <div class="results-header">
+                            <div class="run-status">
+                                <span class="prompt">&gt;</span> 
+                                <span class="status-text">{runOutput}</span>
+                            </div>
+                            {#if runResults.length > 0}
+                                <div class="stats-pills">
+                                    <span class="pill pass">{runResults.filter(r => r.pass).length} Passed</span>
+                                    <span class="pill fail">{runResults.filter(r => !r.pass).length} Failed</span>
+                                </div>
+                            {/if}
+                        </div>
+                        
+                        {#if runResults.length > 0}
+                            <div class="test-grid">
+                                {#each runResults as res, i}
+                                    <div class="test-item {res.pass ? 'pass' : 'fail'}" title={res.error || (res.pass ? 'Passed' : 'Failed')}>
+                                        <div class="test-icon">
+                                            {#if res.pass}
+                                                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                                            {:else}
+                                                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                                            {/if}
+                                        </div>
+                                        <span class="test-label">T{i+1}</span>
+                                    </div>
+                                {/each}
+                            </div>
+                            
+                            <!-- Detailed error for the first failure -->
+                            {@const firstFail = runResults.find(r => !r.pass)}
+                            {#if firstFail && firstFail.error}
+                                <div class="error-detail">
+                                    <span class="error-prefix">Failure Trace:</span>
+                                    <span class="error-msg">{firstFail.error}</span>
+                                </div>
+                            {/if}
+                        {/if}
                     </div>
                 {/if}
 
                 <div class="action-bar">
-                    {#if currentQuestionType === 'full_edit'}
-                        <button class="btn-run" onclick={handleRun}>▶ Run</button>
-                    {/if}
+                    <button class="btn-run {isRunning ? 'loading' : ''}" onclick={handleRun} disabled={isRunning}>
+                        {#if isRunning}
+                            <svg class="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Running...
+                        {:else}
+                            ▶ Run
+                        {/if}
+                    </button>
                     {#if currentQuestionType === 'find_buggy_line' && currentState?.markedLines}
                         <span class="marked-lines-status">
                             🐛 {currentState.markedLines.length} line{currentState.markedLines.length !== 1 ? 's' : ''} marked

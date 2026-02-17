@@ -4,6 +4,7 @@ import { existsSync, statSync } from "fs";
 import { jwtVerify, SignJWT, type JWTPayload } from "jose";
 import * as db from "./db";
 import { wsManager, type WSData } from "./ws_server";
+import { WccRunner } from "./wcc-lib";
 
 await db.initDB();
 
@@ -54,6 +55,51 @@ function resolveFile(pathname: string): string | null {
     }
 
     return filePath;
+}
+
+
+async function evaluateCode(source_code: string, question_id: number) {
+    const { question } = await db.getDebugQuestionById(question_id);
+    if (!question || !question.test_cases || (Array.isArray(question.test_cases) && question.test_cases.length === 0)) {
+        return { results: [], message: "No test cases configured." };
+    }
+
+    const testCases = question.test_cases;
+    const results = [];
+
+    const zipData = await Bun.file(join(import.meta.dir, 'wcc-lib/wccfiles.zip')).arrayBuffer();
+    const runner = new WccRunner({
+        zip: new Uint8Array(zipData)
+    });
+
+    try {
+        await runner.readyPromise;
+        for (const tc of testCases) {
+            try {
+                const execResult = await runner.exec(source_code, {
+                    stdin: tc.input,
+                    timeout: 5000
+                });
+
+                const actualOutput = execResult.stdout.trim();
+                const expectedOutput = tc.output.trim();
+                const pass = actualOutput === expectedOutput;
+
+                results.push({
+                    pass: pass,
+                    error: pass ? null : (execResult.stderr || (execResult.exitCode !== 0 ? `Exit code ${execResult.exitCode}` : "Wrong Answer"))
+                });
+            } catch (e: any) {
+                results.push({
+                    pass: false,
+                    error: e.message || "Time limit exceeded or execution error"
+                });
+            }
+        }
+    } finally {
+        runner.terminate();
+    }
+    return { results };
 }
 
 const server = Bun.serve<WSData>({
@@ -449,6 +495,23 @@ const server = Bun.serve<WSData>({
                     data: body.data
                 });
 
+                // Automated Grading for SUBMIT
+                if (body.type === "SUBMIT" && body.data?.question_id && body.data?.answer) {
+                    const session_id = body.session_id;
+                    const { results } = await evaluateCode(body.data.answer, body.data.question_id);
+
+                    if (results && results.length > 0) {
+                        const allPassed = results.every((r: any) => r.pass);
+                        if (allPassed) {
+                            await db.gradeSubmission(session_id, body.data.question_id, true);
+                        } else {
+                            // If it failed tests, we mark it as incorrect (or leave it for manual? User said "if all pass, then mark as correct")
+                            // Usually if tests fail, it's incorrect.
+                            await db.gradeSubmission(session_id, body.data.question_id, false);
+                        }
+                    }
+                }
+
                 return Res(JSON.stringify({ result: "Logged" }), { status: 200 });
             })
         },
@@ -681,6 +744,25 @@ const server = Bun.serve<WSData>({
                 const { error } = await db.deleteDebugQuestion(id);
                 if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: "Deleted" }));
+            })
+        },
+
+        "/debug/run": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            POST: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload } = await verifyJWT(auth ?? "");
+                if (!payload) throw new HttpError("Unauthorized", 401);
+
+                const { source_code, question_id } = await parseJSON<any>(req);
+                if (!source_code || !question_id) throw new HttpError("Missing source_code or question_id", 400);
+
+                const { results, message } = await evaluateCode(source_code, question_id);
+                if (message) {
+                    return Res(JSON.stringify({ result: { results: [], message } }));
+                }
+
+                return Res(JSON.stringify({ result: { results } }));
             })
         },
 

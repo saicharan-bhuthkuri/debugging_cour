@@ -34,7 +34,8 @@
       code_snippet: "",
       difficulty: "easy",
       question_type: "full_edit",
-      answer_meta: null as any
+      answer_meta: null as any,
+      test_cases: [] as { input: string, output: string }[]
   });
 
   let editingQuestion = $state<any>(null);
@@ -106,7 +107,7 @@
           };
           await api("/debug/question", "POST", payload, token || "");
           isAddModalOpen = false;
-          newQuestion = { title: "", description: "", code_snippet: "", difficulty: "easy", question_type: "full_edit", answer_meta: null };
+          newQuestion = { title: "", description: "", code_snippet: "", difficulty: "easy", question_type: "full_edit", answer_meta: null, test_cases: [] };
           buggyLinesInput = "";
           missingLinesInput = "";
           fetchQuestions();
@@ -130,6 +131,7 @@
       } else {
           editMissingLinesInput = "";
       }
+      if (!editingQuestion.test_cases) editingQuestion.test_cases = [];
       isEditModalOpen = true;
   }
 
@@ -249,6 +251,58 @@
           <div class="font-semibold text-sm text-gray-900">{type.label}</div>
           <div class="text-xs text-gray-500 mt-0.5">{type.desc}</div>
         </button>
+      {/each}
+    </div>
+  </div>
+{/snippet}
+
+{#snippet testCasesEditor(testCases: any[], onUpdate: (tc: any[]) => void)}
+  <div class="space-y-3">
+    <div class="flex items-center justify-between">
+      <label class="text-sm font-medium text-gray-700">Test Cases (for execution)</label>
+      <button 
+        type="button" 
+        onclick={() => onUpdate([...testCases, { input: "", output: "" }])}
+        class="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
+        Add Test Case
+      </button>
+    </div>
+    
+    {#if testCases.length === 0}
+      <div class="text-xs text-gray-400 italic py-2">No test cases added yet. These are required for the "Run" feature.</div>
+    {/if}
+
+    <div class="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-1">
+      {#each testCases as tc, i}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 bg-gray-50 rounded-lg border border-gray-200 relative group">
+          <div>
+            <label class="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Input</label>
+            <textarea 
+              bind:value={tc.input} 
+              rows="1" 
+              class="w-full text-xs px-2 py-1.5 bg-white border border-gray-300 rounded font-mono focus:outline-none focus:border-gray-900"
+              placeholder="No input"
+            ></textarea>
+          </div>
+          <div>
+            <label class="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Expected Output</label>
+            <textarea 
+              bind:value={tc.output} 
+              rows="1" 
+              class="w-full text-xs px-2 py-1.5 bg-white border border-gray-300 rounded font-mono focus:outline-none focus:border-gray-900"
+              placeholder="Expected output"
+            ></textarea>
+          </div>
+          <button 
+            type="button"
+            onclick={() => onUpdate(testCases.filter((_, idx) => idx !== i))}
+            class="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+          </button>
+        </div>
       {/each}
     </div>
   </div>
@@ -385,6 +439,10 @@
         </div>
       {/if}
 
+      <div class="w-full border-t border-gray-100 pt-4">
+        {@render testCasesEditor(newQuestion.test_cases, (tc) => newQuestion.test_cases = tc)}
+      </div>
+
       <div class="pt-4 flex justify-end gap-3">
         <Button variant="secondary" onclick={() => isAddModalOpen = false}>Cancel</Button>
         <Button type="submit" disabled={isSubmitting}>
@@ -466,6 +524,10 @@
           </div>
         {/if}
 
+        <div class="w-full border-t border-gray-100 pt-4">
+          {@render testCasesEditor(editingQuestion.test_cases || [], (tc) => editingQuestion.test_cases = tc)}
+        </div>
+
         <div class="pt-4 flex justify-end gap-3">
             <Button variant="secondary" onclick={() => isEditModalOpen = false}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>
@@ -494,6 +556,26 @@
             <pre class="text-sm font-mono text-gray-300 leading-relaxed">{#each getCodeLines(previewQuestion.code_snippet || '') as line, i}<div class="flex gap-3 hover:bg-white/5 px-2 py-0.5 rounded {previewQuestion.answer_meta?.buggy_lines?.includes(i+1) ? 'bg-red-500/10 border-l-2 border-red-500' : ''} {previewQuestion.answer_meta?.editable_lines?.includes(i+1) ? 'bg-yellow-500/10 border-l-2 border-yellow-500' : ''}"><span class="text-gray-600 select-none w-6 text-right">{i+1}</span><span>{line || ' '}</span></div>{/each}</pre>
           </div>
         </div>
+
+        {#if previewQuestion.test_cases && previewQuestion.test_cases.length > 0}
+          <div class="space-y-2">
+            <div class="text-xs font-mono text-gray-500">Test Cases ({previewQuestion.test_cases.length}):</div>
+            <div class="grid grid-cols-1 gap-2">
+              {#each previewQuestion.test_cases as tc}
+                <div class="text-[10px] font-mono bg-gray-50 p-2 rounded border flex flex-col gap-1">
+                  <div class="flex gap-2">
+                    <span class="text-blue-500 font-bold w-12">IN:</span>
+                    <span class="text-gray-700 whitespace-pre-wrap">{tc.input || '(none)'}</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <span class="text-green-500 font-bold w-12">OUT:</span>
+                    <span class="text-gray-700 whitespace-pre-wrap">{tc.output || '(none)'}</span>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
 
         {#if previewQuestion.answer_meta}
           <div class="text-xs font-mono text-gray-500 p-3 bg-gray-50 rounded-lg border">

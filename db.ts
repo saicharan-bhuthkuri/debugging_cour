@@ -36,12 +36,14 @@ export async function initDB() {
             difficulty TEXT,
             question_type TEXT DEFAULT 'full_edit',
             answer_meta TEXT,
+            test_cases TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`;
 
         // Migration: add new columns if they don't exist
         try { await db`ALTER TABLE debug_questions ADD COLUMN question_type TEXT DEFAULT 'full_edit'`; } catch { }
         try { await db`ALTER TABLE debug_questions ADD COLUMN answer_meta TEXT`; } catch { }
+        try { await db`ALTER TABLE debug_questions ADD COLUMN test_cases TEXT`; } catch { }
 
         await db`CREATE TABLE IF NOT EXISTS debug_levels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -371,6 +373,7 @@ export async function getAllDebugQuestions() {
         // Parse answer_meta JSON
         for (const q of questions) {
             try { if (q.answer_meta) q.answer_meta = JSON.parse(q.answer_meta); } catch { q.answer_meta = null; }
+            try { if (q.test_cases) q.test_cases = JSON.parse(q.test_cases); } catch { q.test_cases = []; }
         }
         return { questions };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
@@ -380,8 +383,9 @@ export async function createDebugQuestion(data: any) {
     try {
         const questionType = data.question_type || 'full_edit';
         const answerMeta = data.answer_meta ? JSON.stringify(data.answer_meta) : null;
-        await db`INSERT INTO debug_questions (title, description, code_snippet, difficulty, question_type, answer_meta) 
-            VALUES (${data.title}, ${data.description}, ${data.code_snippet}, ${data.difficulty}, ${questionType}, ${answerMeta})`;
+        const testCases = data.test_cases ? JSON.stringify(data.test_cases) : null;
+        await db`INSERT INTO debug_questions (title, description, code_snippet, difficulty, question_type, answer_meta, test_cases) 
+            VALUES (${data.title}, ${data.description}, ${data.code_snippet}, ${data.difficulty}, ${questionType}, ${answerMeta}, ${testCases})`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
@@ -390,10 +394,12 @@ export async function updateDebugQuestion(id: number, data: any) {
     try {
         const questionType = data.question_type || 'full_edit';
         const answerMeta = data.answer_meta ? JSON.stringify(data.answer_meta) : null;
+        const testCases = data.test_cases ? JSON.stringify(data.test_cases) : null;
         await db`UPDATE debug_questions SET 
             title = ${data.title}, description = ${data.description}, 
             code_snippet = ${data.code_snippet}, difficulty = ${data.difficulty},
-            question_type = ${questionType}, answer_meta = ${answerMeta}
+            question_type = ${questionType}, answer_meta = ${answerMeta},
+            test_cases = ${testCases}
             WHERE id = ${id}`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
@@ -442,6 +448,18 @@ export async function getDebugLevelById(id: number) {
             try { levels[0].question_ids = JSON.parse(levels[0].question_ids); } catch { levels[0].question_ids = []; }
         }
         return { level: levels[0] };
+    } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
+}
+
+export async function getDebugQuestionById(id: number) {
+    try {
+        const questions = await db`SELECT * FROM debug_questions WHERE id = ${id}`;
+        if (questions.length > 0) {
+            const q = questions[0];
+            try { if (q.answer_meta) q.answer_meta = JSON.parse(q.answer_meta); } catch { q.answer_meta = null; }
+            try { if (q.test_cases) q.test_cases = JSON.parse(q.test_cases); } catch { q.test_cases = []; }
+        }
+        return { question: questions[0] };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 
@@ -676,6 +694,12 @@ export async function getExamResults(options: {
     year?: number,
     level_id?: number
 } = {}) {
+    const examMode = options.exam_mode ?? null;
+    const college = options.college ?? null;
+    const branch = options.branch ?? null;
+    const year = options.year ?? null;
+    const levelId = options.level_id ?? null;
+
     try {
         // Get all completed exam sessions with user info
         const sessions = await db`SELECT es.*, 
@@ -687,16 +711,29 @@ export async function getExamResults(options: {
             LEFT JOIN systems s ON es.system_id = s.id
             LEFT JOIN debug_levels dl ON s.assigned_level_id = dl.id
             WHERE
-                (${options.exam_mode} IS NULL OR es.exam_mode = ${options.exam_mode}) AND
-                (${options.college} IS NULL OR u.college = ${options.college}) AND
-                (${options.branch} IS NULL OR u.branch = ${options.branch}) AND
-                (${options.year} IS NULL OR u.year = ${options.year}) AND
-                (${options.level_id} IS NULL OR s.assigned_level_id = ${options.level_id})
+                (${examMode} IS NULL OR es.exam_mode = ${examMode}) AND
+                (${college} IS NULL OR u.college = ${college}) AND
+                (${branch} IS NULL OR u.branch = ${branch}) AND
+                (${year} IS NULL OR u.year = ${year}) AND
+                (${levelId} IS NULL OR s.assigned_level_id = ${levelId})
             ORDER BY es.start_time DESC
         `;
 
-        // Get all submission grades for all sessions in this request at once to avoid N+1 queries
-        const allGrades = await db`SELECT * FROM debug_submission_grades WHERE session_id IN (${sessions.map((s: any) => s.id)})`;
+        if (sessions.length === 0) return { results: [], error: null };
+
+        // Get all submission grades using the same filters via subquery to avoid array expansion issues
+        const allGrades = await db`SELECT g.* FROM debug_submission_grades g
+            WHERE g.session_id IN (
+                SELECT es.id FROM exam_sessions es
+                LEFT JOIN users u ON es.user_id = u.id
+                LEFT JOIN systems s ON es.system_id = s.id
+                WHERE
+                    (${examMode} IS NULL OR es.exam_mode = ${examMode}) AND
+                    (${college} IS NULL OR u.college = ${college}) AND
+                    (${branch} IS NULL OR u.branch = ${branch}) AND
+                    (${year} IS NULL OR u.year = ${year}) AND
+                    (${levelId} IS NULL OR s.assigned_level_id = ${levelId})
+            )`;
         const gradesMap = new Map<number, Map<number, boolean>>();
         allGrades.forEach((g: any) => {
             if (!gradesMap.has(g.session_id)) gradesMap.set(g.session_id, new Map());
