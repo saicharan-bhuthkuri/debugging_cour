@@ -2,7 +2,9 @@
 let BASE_URL = "http://localhost:3000";
 
 if (typeof window !== "undefined") {
-	BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`;
+	const isDev = import.meta.env.DEV;
+	const port = isDev ? "3000" : window.location.port;
+	BASE_URL = `${window.location.protocol}//${window.location.hostname}${port ? `:${port}` : ""}`;
 }
 
 export async function api(path: string, method: string = "GET", body: any = null, token: string = "") {

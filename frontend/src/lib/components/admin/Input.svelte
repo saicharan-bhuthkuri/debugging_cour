@@ -6,6 +6,7 @@
     placeholder?: string;
     required?: boolean;
     disabled?: boolean;
+    onchange?: (e: Event & { currentTarget: HTMLInputElement }) => void;
   };
 
   let { 
@@ -14,7 +15,8 @@
     type = 'text', 
     placeholder = '', 
     required = false, 
-    disabled = false 
+    disabled = false,
+    onchange
   }: Props = $props();
 </script>
 
@@ -31,6 +33,7 @@
           {placeholder}
           {required}
           {disabled}
+          {onchange}
           class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-all duration-200 disabled:opacity-50 disabled:bg-gray-100"
       />
     </label>
@@ -41,6 +44,7 @@
         {placeholder}
         {required}
         {disabled}
+        {onchange}
         class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-all duration-200 disabled:opacity-50 disabled:bg-gray-100"
     />
   {/if}

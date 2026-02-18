@@ -6,12 +6,12 @@
   import Table from "$lib/components/admin/Table.svelte";
   import Input from "$lib/components/admin/Input.svelte";
   import CreatableSelect from "$lib/components/admin/CreatableSelect.svelte";
-  import { fly } from "svelte/transition";
   import * as adminState from "$lib/admin_state.svelte";
   import * as ws from "$lib/ws.svelte";
   
   let systems = $derived(adminState.getSystems());
   let debugLevels = $state<any[]>([]);
+  let typingLevels = $state<any[]>([]);
   let onlineSystems = $derived(systems.filter(s => s.status === 'online'));
   let users = $state<any[]>([]);
   let loading = $state(true);
@@ -181,6 +181,14 @@
       } catch (e) { console.error(e); }
   }
 
+  async function fetchTypingLevels() {
+      try {
+          const token = localStorage.getItem("login_token");
+          const res = await api("/typing/level", "GET", null, token || "");
+          typingLevels = res || [];
+      } catch (e) { console.error(e); }
+  }
+
   function nextPage() {
       if (currentPage < totalPages) {
           currentPage++;
@@ -199,10 +207,18 @@
       fetchUniqueFields();
       fetchUsers();
       fetchDebugLevels();
+      fetchTypingLevels();
 
       // Ensure systems are synced via WS
       const token = localStorage.getItem("login_token");
       if (token && !ws.state.connected) ws.connect(token);
+  });
+
+  $effect(() => {
+      // Reset level_id when exam_type changes to avoid cross-type level IDs
+      if (newUser.exam_type) {
+          newUser.level_id = null;
+      }
   });
 
 
@@ -412,6 +428,16 @@
                         <select bind:value={newUser.level_id} class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none">
                             <option value={null}>None</option>
                             {#each debugLevels as level}
+                                <option value={level.id}>{level.name}</option>
+                            {/each}
+                        </select>
+                    </div>
+                    {:else if newUser.exam_type === 'typing'}
+                    <div>
+                        <span class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Typing Level</span>
+                        <select bind:value={newUser.level_id} class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none">
+                            <option value={null}>None</option>
+                            {#each typingLevels.toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0)) as level}
                                 <option value={level.id}>{level.name}</option>
                             {/each}
                         </select>

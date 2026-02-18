@@ -24,8 +24,11 @@ export function connect(token: string) {
 
 	const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
+	const isDev = import.meta.env.DEV;
+	const port = isDev ? "3000" : window.location.port;
+
 	// Use dynamic host for LAN access
-	socket = new WebSocket(`${protocol}//${host}:3000?token=${token}`);
+	socket = new WebSocket(`${protocol}//${host}${port ? `:${port}` : ""}?token=${token}`);
 
 	socket.onopen = () => {
 		console.log("WS Connected");

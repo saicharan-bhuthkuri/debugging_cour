@@ -1,12 +1,19 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import { goto } from "$app/navigation";
+    import { goto, pushState, afterNavigate } from "$app/navigation";
     import * as ws from "$lib/ws.svelte";
     import ExamGuard from "$lib/components/ExamGuard.svelte";
 
     // Prevent back navigation to exam
+    afterNavigate(() => {
+        try {
+            pushState(location.href, {});
+        } catch (e) {
+            console.warn("Router not ready for pushState", e);
+        }
+    });
+
     onMount(() => {
-        history.pushState(null, document.title, location.href);
         window.addEventListener('popstate', preventBack);
 
         // Reconnect WS if not connected (keep persistent connection)
@@ -17,7 +24,11 @@
     });
 
     function preventBack() {
-        history.pushState(null, document.title, location.href);
+        try {
+            pushState(location.href, {});
+        } catch (e) {
+            // Fallback for popstate if router is busy
+        }
     }
 
     onDestroy(() => {

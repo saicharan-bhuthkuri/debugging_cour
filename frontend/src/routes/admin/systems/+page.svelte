@@ -39,6 +39,7 @@
   let modalSelectedUserString = $state(""); // Holds the selected string from dropdown
   let selectedExamType = $state("debug");
   let debugLevels = $state<any[]>([]);
+  let typingLevels = $state<any[]>([]);
   let selectedLevelId = $state<number | null>(null);
 
 
@@ -80,6 +81,7 @@
   let examConfirmCountdown = $state(0);
   let pendingStatusChange = $state<{system?: any, status: string, isBulk: boolean} | null>(null);
   let confirmTimer: any;
+  let showSuccess = $state(false);
 
   function startExamConfirm(data: {system?: any, status: string, isBulk: boolean}) {
       pendingStatusChange = data;
@@ -199,8 +201,8 @@
               isOtpVisible = true;
           }
 
-          // Only close if we didn't just generate an OTP
-          if (!res || !res.otp) {
+          // Only close if we didn't just generate an OTP and NOT in bulk mode
+          if (!isBulkManageMode && (!res || !res.otp)) {
               closeDetailView();
           }
           
@@ -209,6 +211,8 @@
           alert("Bulk update failed: " + e.message);
       } finally {
           isSubmitting = false;
+          showSuccess = true;
+          setTimeout(() => showSuccess = false, 2000);
       }
   }
     
@@ -304,6 +308,19 @@
           else debugLevels = [];
       } catch (e) {
           console.error("Failed to fetch debug levels", e);
+      }
+  }
+
+  async function fetchTypingLevels() {
+      try {
+          const token = localStorage.getItem("login_token");
+          if (!token) return;
+          const res = await api("/typing/level", "GET", null, token);
+          if (Array.isArray(res)) typingLevels = res;
+          else if (res.levels) typingLevels = res.levels;
+          else typingLevels = [];
+      } catch (e) {
+          console.error("Failed to fetch typing levels", e);
       }
   }
 
@@ -405,8 +422,12 @@
       }
       modalCollegeFilter = "";
       modalBranchFilter = "";
-      selectedExamType = "debug";
-      selectedLevelId = system.assigned_level_id || (debugLevels.length > 0 ? debugLevels[0].id : null);
+      selectedExamType = system.exam_type || "debug";
+      if (selectedExamType === 'debug') {
+          selectedLevelId = system.assigned_level_id || (debugLevels.length > 0 ? debugLevels[0].id : null);
+      } else {
+          selectedLevelId = system.assigned_level_id || (typingLevels.length > 0 ? typingLevels[0].id : null);
+      }
       isAssignModalOpen = true;
   }
 
@@ -497,6 +518,7 @@
       fetchUsers();
       fetchUniqueFields();
       fetchDebugLevels();
+      fetchTypingLevels();
   });
 
 </script>
@@ -620,8 +642,18 @@
                                 <span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">ID: {selectedSystem?.id}</span>
                             {/if}
                         </div>
-                        <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight">
+                        <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight flex items-center gap-3">
                             {isBulkManageMode ? `${selectedIdsList.length} Systems Selected` : selectedSystem?.code}
+                            {#if isSubmitting}
+                                <div class="h-6 w-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                            {:else if showSuccess}
+                                <div class="text-green-600 text-sm font-bold flex items-center gap-1 animate-bounce">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                    </svg>
+                                    Updated!
+                                </div>
+                            {/if}
                         </h1>
                     </div>
                     {#if !isBulkManageMode}
@@ -738,7 +770,7 @@
                                         <button 
                                             onclick={() => handleTypeChange(selectedSystem, type)}
                                             class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
-                                            {!isBulkManageMode && selectedSystem?.exam_type === type 
+                                            {(isBulkManageMode ? bulkData.exam_type === type : selectedSystem?.exam_type === type)
                                                 ? 'bg-indigo-900 text-white border-indigo-900 ring-2 ring-offset-2 ring-indigo-900' 
                                                 : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
                                         >
@@ -748,9 +780,9 @@
                                 </div>
                             </div>
 
-                            {#if isBulkManageMode || (selectedSystem?.exam_type === 'debug' || !selectedSystem?.exam_type)}
+                            {#if (isBulkManageMode && bulkData.exam_type === 'debug') || (!isBulkManageMode && (selectedSystem?.exam_type === 'debug' || !selectedSystem?.exam_type))}
                             <div>
-                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Level</span>
+                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Level (Debug)</span>
                                 <div class="space-y-3">
                                     <select 
                                         class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm font-medium focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-sm"
@@ -764,6 +796,27 @@
                                     </select>
                                     {#if debugLevels.length === 0}
                                         <p class="text-[10px] text-amber-600 font-medium">No debug levels available.</p>
+                                    {/if}
+                                </div>
+                            </div>
+                            {/if}
+
+                            {#if (isBulkManageMode && bulkData.exam_type === 'typing') || (!isBulkManageMode && selectedSystem?.exam_type === 'typing')}
+                            <div>
+                                <span class="text-sm font-bold text-gray-900 uppercase tracking-wider block mb-4">Exam Level (Typing)</span>
+                                <div class="space-y-3">
+                                    <select 
+                                        class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm font-medium focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-sm"
+                                        value={!isBulkManageMode ? selectedSystem?.assigned_level_id : bulkData.assigned_level_id}
+                                        onchange={(e) => handleLevelChange(selectedSystem, parseInt(e.currentTarget.value))}
+                                    >
+                                        <option value={null} disabled={!isBulkManageMode}>Select Level</option>
+                                        {#each typingLevels.toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0)) as level}
+                                            <option value={level.id}>{level.name}</option>
+                                        {/each}
+                                    </select>
+                                    {#if typingLevels.length === 0}
+                                        <p class="text-[10px] text-amber-600 font-medium">No typing levels available.</p>
                                     {/if}
                                 </div>
                             </div>
@@ -791,7 +844,7 @@
                                             <button 
                                                 onclick={() => handleStatusChange(selectedSystem, status)}
                                                 class="cursor-pointer px-3 py-2.5 text-sm font-semibold rounded-lg transition-all border shadow-sm
-                                                {!isBulkManageMode && selectedSystem?.status === status 
+                                                {(isBulkManageMode ? bulkData.status === status : selectedSystem?.status === status)
                                                     ? 'bg-gray-900 text-white border-gray-900 ring-2 ring-offset-2 ring-gray-900' 
                                                     : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}"
                                             >
@@ -1067,20 +1120,33 @@
              </select>
          </div>
 
-         {#if selectedExamType === 'debug'}
-         <div class="w-full">
-             <span class="text-sm font-medium text-gray-700 block mb-1.5">Assign Level <span class="text-red-500">*</span></span>
-             <select bind:value={selectedLevelId} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" required>
-                 <option value={null} disabled>Select a level...</option>
-                 {#each debugLevels.toSorted((a, b) => (a.order_num || a.order || 0) - (b.order_num || b.order || 0)) as level}
-                     <option value={level.id}>{level.name} ({Math.floor((level.duration || 900) / 60)} min, {level.question_ids?.length || 0} questions)</option>
-                 {/each}
-             </select>
-             {#if debugLevels.length === 0}
-                 <p class="text-xs text-amber-600 mt-1">No levels found. Create levels in Debug > Levels first.</p>
-             {/if}
-         </div>
-         {/if}
+          {#if selectedExamType === 'debug'}
+          <div class="w-full">
+              <span class="text-sm font-medium text-gray-700 block mb-1.5">Assign Level (Debug) <span class="text-red-500">*</span></span>
+              <select bind:value={selectedLevelId} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" required>
+                  <option value={null} disabled>Select a level...</option>
+                  {#each debugLevels.toSorted((a, b) => (a.order_num || a.order || 0) - (b.order_num || b.order || 0)) as level}
+                      <option value={level.id}>{level.name} ({Math.floor((level.duration || 900) / 60)} min, {level.question_ids?.length || 0} questions)</option>
+                  {/each}
+              </select>
+              {#if debugLevels.length === 0}
+                  <p class="text-xs text-amber-600 mt-1">No levels found. Create levels in Debug > Levels first.</p>
+              {/if}
+          </div>
+          {:else if selectedExamType === 'typing'}
+          <div class="w-full">
+              <span class="text-sm font-medium text-gray-700 block mb-1.5">Assign Level (Typing) <span class="text-red-500">*</span></span>
+              <select bind:value={selectedLevelId} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900" required>
+                  <option value={null} disabled>Select a level...</option>
+                  {#each typingLevels.toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0)) as level}
+                      <option value={level.id}>{level.name} ({level.time_limit}s, {level.passing_accuracy}%)</option>
+                  {/each}
+              </select>
+              {#if typingLevels.length === 0}
+                  <p class="text-xs text-amber-600 mt-1">No levels found. Create levels in Typing > Levels first.</p>
+              {/if}
+          </div>
+          {/if}
       </div>
 
       <div class="bg-blue-50 p-3 rounded-lg text-sm text-blue-700">

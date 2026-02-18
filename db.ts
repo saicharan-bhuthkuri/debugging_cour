@@ -505,6 +505,109 @@ export async function deleteTypingLevel(id: number) {
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 
+export async function getTypingLevelById(id: number) {
+    try {
+        const levels = await db`SELECT * FROM typing_levels WHERE id = ${id}`;
+        return { level: levels[0] };
+    } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
+}
+
+export async function getTypingResults(options: {
+    college?: string,
+    branch?: string,
+    year?: number
+} = {}) {
+    const college = options.college ?? null;
+    const branch = options.branch ?? null;
+    const year = options.year ?? null;
+
+    try {
+        // Get all typing exam sessions
+        const sessions = await db`SELECT es.*, 
+            u.name as user_name, u.branch, u.college, u.year as user_year, u.phone,
+            s.code as system_code, s.assigned_level_id, s.exam_type
+            FROM exam_sessions es
+            LEFT JOIN users u ON es.user_id = u.id
+            LEFT JOIN systems s ON es.system_id = s.id
+            WHERE es.exam_mode = 'typing' AND
+                (${college} IS NULL OR u.college = ${college}) AND
+                (${branch} IS NULL OR u.branch = ${branch}) AND
+                (${year} IS NULL OR u.year = ${year})
+            ORDER BY es.start_time DESC
+        `;
+
+        if (sessions.length === 0) return { results: [] };
+
+        const results: any[] = [];
+
+        for (const session of sessions) {
+            // Get TYPING_RESULT logs for this session
+            const logs = await db`SELECT * FROM system_logs 
+                WHERE exam_session_id = ${session.id} 
+                AND log_type = 'TYPING_RESULT'
+                ORDER BY timestamp ASC`;
+
+            const attempts: any[] = [];
+            let bestWpm = 0;
+            let bestAccuracy = 0;
+            let anyPassed = false;
+
+            for (const log of logs) {
+                let data: any = {};
+                try { data = typeof log.data === 'string' ? JSON.parse(log.data) : (log.data || {}); } catch { }
+
+                const attempt = {
+                    attempt_num: data.attempt || attempts.length + 1,
+                    wpm: data.wpm || 0,
+                    raw_wpm: data.raw_wpm || 0,
+                    accuracy: data.accuracy || 0,
+                    consistency: data.consistency || 0,
+                    correct_chars: data.correct_chars || 0,
+                    incorrect_chars: data.incorrect_chars || 0,
+                    extra_chars: data.extra_chars || 0,
+                    missed_chars: data.missed_chars || 0,
+                    time_elapsed: data.time_elapsed || 0,
+                    time_limit: data.time_limit || 0,
+                    words_completed: data.words_completed || 0,
+                    passed: data.passed || false,
+                    wpm_history: data.wpm_history || [],
+                    timestamp: data.timestamp || log.timestamp
+                };
+
+                if (attempt.wpm > bestWpm) bestWpm = attempt.wpm;
+                if (attempt.accuracy > bestAccuracy) bestAccuracy = attempt.accuracy;
+                if (attempt.passed) anyPassed = true;
+
+                attempts.push(attempt);
+            }
+
+            results.push({
+                session_id: session.id,
+                user_id: session.user_id,
+                user_name: session.user_name,
+                branch: session.branch,
+                college: session.college,
+                year: session.user_year,
+                phone: session.phone,
+                system_code: session.system_code,
+                level_name: session.level_name || 'N/A',
+                status: session.status,
+                start_time: session.start_time,
+                end_time: session.end_time,
+                attempts,
+                best_wpm: bestWpm,
+                best_accuracy: bestAccuracy,
+                passed: anyPassed,
+                total_attempts: attempts.length
+            });
+        }
+
+        return { results };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
 // --- EXAM SESSIONS & LOGS ---
 
 export async function createExamSession(data: { user_id: number, system_id: number, exam_mode: string }) {

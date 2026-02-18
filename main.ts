@@ -35,26 +35,29 @@ const secret = new TextEncoder().encode(JWT_TOKEN);
 const ROOT = "./build";
 
 function resolveFile(pathname: string): string | null {
-    let filePath = join(ROOT, pathname);
+    // Normalize path and prevent directory traversal
+    const normalizedPath = normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+    let filePath = join(ROOT, normalizedPath);
 
-    if (!existsSync(filePath)) {
-        // try .html (e.g. /admin → /admin.html)
-        if (!extname(filePath)) {
-            const htmlPath = filePath + ".html";
-            if (existsSync(htmlPath)) return htmlPath;
+    // 1. Try direct match (file or directory/index.html)
+    if (existsSync(filePath)) {
+        const stat = statSync(filePath);
+        if (stat.isFile()) return filePath;
+
+        if (stat.isDirectory()) {
+            const indexFile = join(filePath, "index.html");
+            if (existsSync(indexFile)) return indexFile;
         }
-        return null;
     }
 
-    const stat = statSync(filePath);
-
-    if (stat.isDirectory()) {
-        const indexFile = join(filePath, "index.html");
-        if (existsSync(indexFile)) return indexFile;
-        return null;
+    // 2. Try .html fallback (Clean URLs)
+    // Strip trailing slash if any before appending .html
+    if (!extname(filePath)) {
+        const htmlPath = filePath.replace(/[\/\\]$/, "") + ".html";
+        if (existsSync(htmlPath)) return htmlPath;
     }
 
-    return filePath;
+    return null;
 }
 
 
@@ -543,8 +546,13 @@ const server = Bun.serve<WSData>({
                 // Fetch level info if assigned
                 let levelInfo: any = null;
                 if (system.assigned_level_id) {
-                    const { level } = await db.getDebugLevelById(system.assigned_level_id);
-                    if (level) levelInfo = { id: level.id, name: level.name, duration: level.duration || 900 };
+                    if (system.exam_type === 'typing') {
+                        const { level } = await db.getTypingLevelById(system.assigned_level_id);
+                        if (level) levelInfo = { id: level.id, name: level.name, duration: level.time_limit || 60 };
+                    } else {
+                        const { level } = await db.getDebugLevelById(system.assigned_level_id);
+                        if (level) levelInfo = { id: level.id, name: level.name, duration: level.duration || 900 };
+                    }
                 }
 
                 return Res(JSON.stringify({
@@ -847,6 +855,62 @@ const server = Bun.serve<WSData>({
                 const { error } = await db.deleteTypingLevel(id);
                 if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: "Deleted" }));
+            })
+        },
+
+        // --- TYPING LEVEL: Current (for students) ---
+        "/typing/level/current": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                const auth = req.headers.get("Authorization");
+                const { payload, error: authErr } = await verifyJWT(auth ?? "");
+                if (authErr || !payload) throw new HttpError("Unauthorized", 401);
+
+                // Get the system this user is on
+                const systemCode = req.headers.get("x-system-code") || "";
+                let system: any = null;
+
+                if (systemCode) {
+                    const res = await db.getSystemByCode(systemCode);
+                    system = res.system;
+                } else {
+                    // Find system by user assignment
+                    const { systems } = await db.getAllSystems();
+                    if (systems) {
+                        system = systems.find((s: any) => s.assigned_to === (payload as any).id);
+                    }
+                }
+
+                if (!system || !system.assigned_level_id) {
+                    // Return default typing config
+                    return Res(JSON.stringify({ result: { name: "Typing Test", time_limit: 60, passing_accuracy: 90, attempts_allowed: 2, content: "" } }));
+                }
+
+                // Check if this is a typing exam
+                if (system.exam_type === 'typing') {
+                    const { level } = await db.getTypingLevelById(system.assigned_level_id);
+                    if (level) {
+                        return Res(JSON.stringify({ result: level }));
+                    }
+                }
+
+                return Res(JSON.stringify({ result: { name: "Typing Test", time_limit: 60, passing_accuracy: 90, attempts_allowed: 2, content: "" } }));
+            })
+        },
+
+        // --- ADMIN: TYPING RESULTS ---
+        "/admin/typing/results": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const url = new URL(req.url);
+                const college = url.searchParams.get("college") || undefined;
+                const branch = url.searchParams.get("branch") || undefined;
+                const year = url.searchParams.get("year") ? Number(url.searchParams.get("year")) : undefined;
+
+                const { results, error } = await db.getTypingResults({ college, branch, year });
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: results }));
             })
         },
 

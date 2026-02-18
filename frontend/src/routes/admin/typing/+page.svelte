@@ -134,7 +134,16 @@
 
 <div class="space-y-6">
   <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-    <h1 class="text-3xl font-bold text-gray-900">Typing Levels</h1>
+    <div class="flex items-center gap-4">
+      <h1 class="text-3xl font-bold text-gray-900">Typing Levels</h1>
+      <a href="/admin/typing/results" class="text-sm px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors font-medium text-gray-600 flex items-center gap-1.5">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+          <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+        </svg>
+        View Results
+      </a>
+    </div>
     <Button onclick={() => isAddModalOpen = true}>
       <span class="flex items-center gap-2">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
