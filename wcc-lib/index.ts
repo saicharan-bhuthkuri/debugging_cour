@@ -10,6 +10,10 @@ export interface ExecResult {
 export interface WccRunnerOptions {
 	/** Path/URL to the zip file, or the zip data itself as Uint8Array */
 	zip?: string | Uint8Array;
+	/** Path/URL to the worker file */
+	workerURL?: string | URL;
+	/** Raw worker code as string */
+	workerCode?: string;
 }
 
 export interface ExecOptions {

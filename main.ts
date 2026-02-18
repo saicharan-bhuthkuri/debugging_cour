@@ -5,6 +5,8 @@ import { jwtVerify, SignJWT, type JWTPayload } from "jose";
 import * as db from "./db";
 import { wsManager, type WSData } from "./ws_server";
 import { WccRunner } from "./wcc-lib";
+import wccfiles from './wcc-lib/wccfiles.zip' with { type: "file" };
+import wasiWorkerURL from './wcc-lib/wasi_worker.js' with { type: "file" };
 
 await db.initDB();
 
@@ -70,19 +72,24 @@ async function evaluateCode(source_code: string, question_id: number) {
     const testCases = question.test_cases;
     const results = [];
 
-    const zipData = await Bun.file(join(import.meta.dir, 'wcc-lib/wccfiles.zip')).arrayBuffer();
+    console.log('loading');
+    const zipData = await Bun.file(wccfiles).arrayBuffer();
     const runner = new WccRunner({
-        zip: new Uint8Array(zipData)
+        zip: new Uint8Array(zipData),
+        workerURL: wasiWorkerURL as any
     });
+    console.log('ready');
 
     try {
         await runner.readyPromise;
         for (const tc of testCases) {
             try {
+                console.log('executing');
                 const execResult = await runner.exec(source_code, {
                     stdin: tc.input,
                     timeout: 5000
                 });
+                console.log('executed', execResult);
 
                 const actualOutput = execResult.stdout.trim();
                 const expectedOutput = tc.output.trim();
@@ -93,6 +100,7 @@ async function evaluateCode(source_code: string, question_id: number) {
                     error: pass ? null : (execResult.stderr || (execResult.exitCode !== 0 ? `Exit code ${execResult.exitCode}` : "Wrong Answer"))
                 });
             } catch (e: any) {
+                console.log('error executing')
                 results.push({
                     pass: false,
                     error: e.message || "Time limit exceeded or execution error"

@@ -1039,7 +1039,16 @@ class WccRunner {
     this.messageId = 0;
     this.actionHandlerMap = /* @__PURE__ */ new Map();
     const zip = options.zip || "wccfiles.zip";
-    this.worker = new WorkerWrapper();
+    
+    if (options.workerCode) {
+      const blob = new Blob([options.workerCode], { type: 'text/javascript' });
+      this.worker = new Worker(URL.createObjectURL(blob));
+    } else if (options.workerURL) {
+      this.worker = new Worker(options.workerURL, { name: options.name });
+    } else {
+      this.worker = new WorkerWrapper(options);
+    }
+
     this.worker.onmessage = (ev) => {
       const data = ev.data;
       if (data.messageId != null && this.actionHandlerMap.has(data.messageId)) {
