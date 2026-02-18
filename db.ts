@@ -515,24 +515,32 @@ export async function getTypingLevelById(id: number) {
 export async function getTypingResults(options: {
     college?: string,
     branch?: string,
-    year?: number
+    year?: number,
+    level_id?: number,
+    status?: string
 } = {}) {
     const college = options.college ?? null;
     const branch = options.branch ?? null;
     const year = options.year ?? null;
+    const levelId = options.level_id ?? null;
+    const status = options.status ?? null;
 
     try {
         // Get all typing exam sessions
         const sessions = await db`SELECT es.*, 
             u.name as user_name, u.branch, u.college, u.year as user_year, u.phone,
-            s.code as system_code, s.assigned_level_id, s.exam_type
+            s.code as system_code, s.assigned_level_id, s.exam_type,
+            tl.name as level_name
             FROM exam_sessions es
             LEFT JOIN users u ON es.user_id = u.id
             LEFT JOIN systems s ON es.system_id = s.id
+            LEFT JOIN typing_levels tl ON s.assigned_level_id = tl.id
             WHERE es.exam_mode = 'typing' AND
                 (${college} IS NULL OR u.college = ${college}) AND
                 (${branch} IS NULL OR u.branch = ${branch}) AND
-                (${year} IS NULL OR u.year = ${year})
+                (${year} IS NULL OR u.year = ${year}) AND
+                (${levelId} IS NULL OR s.assigned_level_id = ${levelId}) AND
+                (${status} IS NULL OR es.status = ${status})
             ORDER BY es.start_time DESC
         `;
 
@@ -590,7 +598,7 @@ export async function getTypingResults(options: {
                 year: session.user_year,
                 phone: session.phone,
                 system_code: session.system_code,
-                level_name: session.level_name || 'N/A',
+                level_name: (session as any).level_name || 'N/A',
                 status: session.status,
                 start_time: session.start_time,
                 end_time: session.end_time,
@@ -978,6 +986,24 @@ export async function getResultGroupOptions() {
             years: years.map((y: any) => y.year),
             levels: levels.map((l: any) => ({ id: l.id, name: l.name })),
             modes: modes.map((m: any) => m.exam_mode)
+        };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
+export async function getTypingResultGroupOptions() {
+    try {
+        const colleges = await db`SELECT DISTINCT u.college FROM exam_sessions es LEFT JOIN users u ON es.user_id = u.id WHERE es.exam_mode = 'typing' AND u.college IS NOT NULL AND u.college != '' ORDER BY u.college`;
+        const branches = await db`SELECT DISTINCT u.branch FROM exam_sessions es LEFT JOIN users u ON es.user_id = u.id WHERE es.exam_mode = 'typing' AND u.branch IS NOT NULL AND u.branch != '' ORDER BY u.branch`;
+        const years = await db`SELECT DISTINCT u.year FROM exam_sessions es LEFT JOIN users u ON es.user_id = u.id WHERE es.exam_mode = 'typing' AND u.year IS NOT NULL ORDER BY u.year`;
+        const levels = await db`SELECT DISTINCT tl.id, tl.name FROM exam_sessions es LEFT JOIN systems s ON es.system_id = s.id LEFT JOIN typing_levels tl ON s.assigned_level_id = tl.id WHERE es.exam_mode = 'typing' AND tl.id IS NOT NULL ORDER BY tl.name`;
+
+        return {
+            colleges: colleges.map((c: any) => c.college),
+            branches: branches.map((b: any) => b.branch),
+            years: years.map((y: any) => y.year),
+            levels: levels.map((l: any) => ({ id: l.id, name: l.name }))
         };
     } catch (error) {
         return { error: error instanceof Error ? error.message : "Unknown error" };

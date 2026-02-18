@@ -72,24 +72,20 @@ async function evaluateCode(source_code: string, question_id: number) {
     const testCases = question.test_cases;
     const results = [];
 
-    console.log('loading');
     const zipData = await Bun.file(wccfiles).arrayBuffer();
     const runner = new WccRunner({
         zip: new Uint8Array(zipData),
         workerURL: wasiWorkerURL as any
     });
-    console.log('ready');
 
     try {
         await runner.readyPromise;
         for (const tc of testCases) {
             try {
-                console.log('executing');
                 const execResult = await runner.exec(source_code, {
                     stdin: tc.input,
                     timeout: 5000
                 });
-                console.log('executed', execResult);
 
                 const actualOutput = execResult.stdout.trim();
                 const expectedOutput = tc.output.trim();
@@ -100,7 +96,6 @@ async function evaluateCode(source_code: string, question_id: number) {
                     error: pass ? null : (execResult.stderr || (execResult.exitCode !== 0 ? `Exit code ${execResult.exitCode}` : "Wrong Answer"))
                 });
             } catch (e: any) {
-                console.log('error executing')
                 results.push({
                     pass: false,
                     error: e.message || "Time limit exceeded or execution error"
@@ -912,13 +907,26 @@ const server = Bun.serve<WSData>({
             GET: handler(async req => {
                 await requireAdmin(req);
                 const url = new URL(req.url);
-                const college = url.searchParams.get("college") || undefined;
-                const branch = url.searchParams.get("branch") || undefined;
-                const year = url.searchParams.get("year") ? Number(url.searchParams.get("year")) : undefined;
+                const options: any = {};
+                if (url.searchParams.get("college")) options.college = url.searchParams.get("college");
+                if (url.searchParams.get("branch")) options.branch = url.searchParams.get("branch");
+                if (url.searchParams.get("year")) options.year = Number(url.searchParams.get("year"));
+                if (url.searchParams.get("level_id")) options.level_id = Number(url.searchParams.get("level_id"));
+                if (url.searchParams.get("status")) options.status = url.searchParams.get("status");
 
-                const { results, error } = await db.getTypingResults({ college, branch, year });
+                const { results, error } = await db.getTypingResults(options);
                 if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: results }));
+            })
+        },
+
+        "/admin/typing/results/options": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { colleges, branches, years, levels, error } = await db.getTypingResultGroupOptions() as any;
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: { colleges, branches, years, levels } }));
             })
         },
 
