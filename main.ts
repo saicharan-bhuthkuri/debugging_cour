@@ -115,33 +115,19 @@ async function evaluateCode(source_code: string, question_id: number) {
 
     try {
         await runner.readyPromise;
-        for (const tc of testCases) {
-            try {
-                const execResult = await runner.exec(source_code, {
-                    stdin: tc.input,
-                    timeout: 5000
-                });
-
-                const actualOutput = execResult.stdout.trim();
-                const expectedOutput = tc.output.trim();
-                const pass = actualOutput === expectedOutput;
-
-                results.push({
-                    pass: pass,
-                    error: pass ? null : (execResult.stderr || (execResult.exitCode !== 0 ? `Exit code ${execResult.exitCode}` : "Wrong Answer"))
-                });
-            } catch (e: any) {
-                results.push({
-                    pass: false,
-                    error: e.message || "Time limit exceeded or execution error"
-                });
-            }
-        }
+        const batchResult = await runner.execBatch(source_code, testCases, { timeout: 5000 });
+        return { results: batchResult.results };
+    } catch (e: any) {
+        return {
+            results: testCases.map(() => ({
+                pass: false,
+                error: e.message || "Execution error"
+            }))
+        };
     } finally {
         runner.terminate();
         release();
     }
-    return { results };
 }
 
 const server = Bun.serve<WSData>({

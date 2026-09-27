@@ -38,6 +38,34 @@ export const WccRunner = Runner as unknown as {
 		exec(source: string, options?: ExecOptions): Promise<ExecResult>;
 
 		/**
+		 * Compiles C source code once to a.wasm.
+		 */
+		compile(source: string, options?: ExecOptions): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+
+		/**
+		 * Executes the previously compiled a.wasm binary.
+		 */
+		runBinary(options?: ExecOptions): Promise<ExecResult>;
+
+		/**
+		 * Compiles source code once and evaluates multiple test cases sequentially.
+		 */
+		execBatch(
+			source: string,
+			testCases: { input?: string; output?: string }[],
+			options?: ExecOptions
+		): Promise<{
+			compiled: boolean;
+			error?: string;
+			results: {
+				pass: boolean;
+				error?: string | null;
+				actualOutput?: string;
+				expectedOutput?: string;
+			}[];
+		}>;
+
+		/**
 		 * Forcefully terminates the underlying worker process.
 		 */
 		terminate(): void;

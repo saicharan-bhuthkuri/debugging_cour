@@ -1,3 +1,5 @@
+import { STDIO_H } from './stdio_impl.js';
+
 function getDefaultExportFromCjs(x) {
   return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
 }
@@ -1088,6 +1090,8 @@ class WccRunner {
     }
     if (!ccExists)
       throw new Error("C-compiler not found in the zip file");
+    // Inject enhanced stdio.h with complete formatted input engine (scanf, sscanf, fscanf)
+    await this.writeFile("/usr/include/stdio.h", STDIO_H);
     await this.chdir(HOME);
   }
   terminate() {
@@ -1097,23 +1101,29 @@ class WccRunner {
     }
     this.actionHandlerMap.clear();
   }
-  async exec(source, options = {}) {
+  async compile(source, options = {}) {
     await this.readyPromise;
-    const sourceName = "main.c";
-    const outName = "a.wasm";
-    await this.writeFile(sourceName, source);
-    const compileRes = await this.withTimeout(
-      this.runWasi(CC_PATH, [CC_PATH, sourceName]),
-      options.timeout
-    );
-    if (compileRes.exitCode !== 0) {
-      throw new Error(`Compilation failed:
-${compileRes.stderr}`);
+    let processedSource = source;
+    if (!processedSource.includes("<stdio.h>")) {
+      processedSource = "#include <stdio.h>\n" + processedSource;
     }
-    const runArgs = [outName, ...options.args || []];
+    if (!processedSource.includes("<stdlib.h>")) {
+      processedSource = "#include <stdlib.h>\n" + processedSource;
+    }
+    const sourceName = "main.c";
+    await this.writeFile(sourceName, processedSource);
+    return await this.withTimeout(
+      this.runWasi(CC_PATH, [CC_PATH, sourceName]),
+      options.timeout || 10000
+    );
+  }
+  async runBinary(options = {}) {
+    await this.readyPromise;
+    const outName = "a.wasm";
+    const runArgs = [outName, ...(options.args || [])];
     const runRes = await this.withTimeout(
-      this.runWasi(outName, runArgs, options.stdin),
-      options.timeout
+      this.runWasi(outName, runArgs, options.stdin != null ? options.stdin : ""),
+      options.timeout || 5000
     );
     return {
       stdin: options.stdin || "",
@@ -1121,6 +1131,47 @@ ${compileRes.stderr}`);
       stderr: runRes.stderr,
       exitCode: runRes.exitCode
     };
+  }
+  async exec(source, options = {}) {
+    const compileRes = await this.compile(source, options);
+    if (compileRes.exitCode !== 0) {
+      throw new Error(`Compilation failed:\n${compileRes.stderr}`);
+    }
+    return await this.runBinary(options);
+  }
+  async execBatch(source, testCases, options = {}) {
+    const compileRes = await this.compile(source, options);
+    if (compileRes.exitCode !== 0) {
+      return {
+        compiled: false,
+        error: `Compilation failed:\n${compileRes.stderr}`,
+        results: testCases.map(() => ({ pass: false, error: compileRes.stderr }))
+      };
+    }
+    const results = [];
+    for (const tc of testCases) {
+      try {
+        const runRes = await this.runBinary({
+          stdin: tc.input != null ? tc.input : "",
+          timeout: options.timeout || 5000
+        });
+        const actualOutput = runRes.stdout.trim();
+        const expectedOutput = (tc.output || "").trim();
+        const pass = actualOutput === expectedOutput;
+        results.push({
+          pass,
+          actualOutput,
+          expectedOutput,
+          error: pass ? null : (runRes.stderr || (runRes.exitCode !== 0 ? `Exit code ${runRes.exitCode}` : "Wrong Answer"))
+        });
+      } catch (err) {
+        results.push({
+          pass: false,
+          error: err.message || "Time limit exceeded or execution error"
+        });
+      }
+    }
+    return { compiled: true, results };
   }
   async withTimeout(promise, timeout) {
     if (!timeout) return promise;

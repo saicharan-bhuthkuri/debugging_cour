@@ -2555,8 +2555,11 @@
           ".": curDir
         }
       });
-      if (stdin) {
+      if (stdin != null) {
         this.wasmFs.fs.writeFileSync("/dev/stdin", stdin);
+        if (this.wasmFs.volume && this.wasmFs.volume.fds && this.wasmFs.volume.fds[0]) {
+          this.wasmFs.volume.fds[0].position = 0;
+        }
       }
       this.imports = {
         wasi_snapshot_preview1: this.wasi.wasiImport

@@ -28,9 +28,10 @@ The platform supports two simultaneous competition tracks:
 - **Synchronized Remote Start**: Launch or conclude exam sessions across all lab systems simultaneously with a single click.
 
 ### 🛡️ Isolated WebAssembly C Sandbox (`wcc-lib`)
-- **Fast & Isolated**: Compiles and executes C code inside a dedicated Web Worker using WebAssembly and WASI.
-- **Zero Heavy Infrastructure**: Eliminates the overhead of Docker containers or remote execution servers.
-- **Safety & Throttling**: Built-in 5-second execution timeouts and a concurrency worker queue to prevent server resource starvation.
+- **Universal C Compatibility**: Full standard C runtime supporting standard formatted I/O (`scanf`, `sscanf`, `fscanf`, `printf`), math (`<math.h>`), strings (`<string.h>`), dynamic memory (`malloc`/`free`/`calloc`/`realloc`), sorting (`qsort`), and algorithms.
+- **Single-Compile Multi-Execution (`execBatch`)**: Compiles student source code once to WebAssembly and evaluates multiple test cases sequentially in milliseconds (<150ms per submission).
+- **Fast & Isolated**: Runs completely inside an in-memory WASI virtual filesystem with zero native GCC/Clang dependencies needed on host or client machines.
+- **Safety & Throttling**: Built-in execution timeouts, automatic missing header injection guards (`<stdio.h>`, `<stdlib.h>`), and semaphore concurrency queuing to prevent server resource starvation.
 
 ### 📝 Two Examination Tracks
 - **Debugging Challenges**:
