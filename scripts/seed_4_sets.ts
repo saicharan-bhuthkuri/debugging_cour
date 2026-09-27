@@ -1409,20 +1409,25 @@ async function main() {
     // Map titles + language to sets
     const titleToSet: Record<string, string> = {};
     for (const q of questions) {
-        titleToSet[`${q.title}_${q.language}`] = q.set;
+        const setLabel = q.set.endsWith('_A') ? 'Set A' :
+                         q.set.endsWith('_B') ? 'Set B' :
+                         q.set.endsWith('_C') ? 'Set C' : 'Set D';
+        const formattedTitle = `[${setLabel}] ${q.title}`;
+        titleToSet[`${formattedTitle}_${q.language}`] = q.set;
         const { error } = await db.createDebugQuestion({
-            title: q.title,
+            title: formattedTitle,
             description: q.description,
             code_snippet: q.code_snippet,
             answer: q.answer,
             difficulty: q.difficulty,
             question_type: q.question_type,
             language: q.language,
+            set_name: setLabel,
             test_cases: q.test_cases,
             order: q.order
         });
         if (error) {
-            console.error(`Error inserting ${q.title}:`, error);
+            console.error(`Error inserting ${formattedTitle}:`, error);
             process.exit(1);
         }
     }

@@ -35,7 +35,7 @@ import { questions as seedQuestions } from "./scripts/seed_4_sets";
 
 // --- TEST 2: C Question Evaluation ---
 const testCQMeta = cQuestions[0];
-const cSolution = seedQuestions.find((q: any) => q.title === testCQMeta.title && q.language === "c")?.answer || "";
+const cSolution = seedQuestions.find((q: any) => testCQMeta.title.includes(q.title) && q.language === "c")?.answer || "";
 console.log(`\n2. Testing C Question (ID: ${testCQMeta.id}, "${testCQMeta.title}")...`);
 
 let t0 = performance.now();
@@ -55,7 +55,7 @@ console.log("[PASS] C Question: all test cases passed!");
 
 // --- TEST 3: Python Question Evaluation ---
 const testPyQMeta = pyQuestions[0];
-const pySolution = seedQuestions.find((q: any) => q.title === testPyQMeta.title && q.language === "python")?.answer || "";
+const pySolution = seedQuestions.find((q: any) => testPyQMeta.title.includes(q.title) && q.language === "python")?.answer || "";
 console.log(`\n3. Testing Python Question (ID: ${testPyQMeta.id}, "${testPyQMeta.title}")...`);
 
 t0 = performance.now();
