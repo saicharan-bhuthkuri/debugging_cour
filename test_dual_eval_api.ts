@@ -15,31 +15,36 @@ const adminToken = await new SignJWT({
 
 const API_BASE = "http://localhost:3000";
 
-// --- TEST 1: C Question Evaluation ---
-console.log("\n1. Testing C Question (ID: 6, Sum and Average)...");
-const cSolution = `
-#include <stdio.h>
-int main() {
-    int n;
-    if (scanf("%d", &n) != 1 || n <= 0) return 0;
-    int sum = 0;
-    for (int i = 0; i < n; i++) {
-        int v;
-        scanf("%d", &v);
-        sum += v;
-    }
-    printf("SUM: %d\\nAVG: %.2f\\n", sum, (double)sum / n);
-    return 0;
-}
-`;
-
-let t0 = performance.now();
-let res = await fetch(`${API_BASE}/debug/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminToken}` },
-    body: JSON.stringify({ question_id: 6, source_code: cSolution, language: "c" })
+// --- FETCH QUESTIONS ---
+console.log("\n1. Fetching questions via GET /debug/question...");
+let res = await fetch(`${API_BASE}/debug/question`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
 });
 let data = await res.json();
+const questions = data.result || [];
+const cQuestions = questions.filter((q: any) => q.language === "c");
+const pyQuestions = questions.filter((q: any) => q.language === "python");
+
+console.log(`Retrieved ${questions.length} questions: ${cQuestions.length} C questions, ${pyQuestions.length} Python questions.`);
+if (cQuestions.length === 0 || pyQuestions.length === 0) {
+    console.error("Missing questions in DB!");
+    process.exit(1);
+}
+
+import { questions as seedQuestions } from "./scripts/seed_4_sets";
+
+// --- TEST 2: C Question Evaluation ---
+const testCQMeta = cQuestions[0];
+const cSolution = seedQuestions.find((q: any) => q.title === testCQMeta.title && q.language === "c")?.answer || "";
+console.log(`\n2. Testing C Question (ID: ${testCQMeta.id}, "${testCQMeta.title}")...`);
+
+let t0 = performance.now();
+res = await fetch(`${API_BASE}/debug/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminToken}` },
+    body: JSON.stringify({ question_id: testCQMeta.id, source_code: cSolution, language: "c" })
+});
+data = await res.json();
 let elapsed = (performance.now() - t0).toFixed(1);
 console.log(`C Question response in ${elapsed}ms:`, JSON.stringify(data));
 if (!data.result?.results?.every((r: any) => r.pass)) {
@@ -48,31 +53,16 @@ if (!data.result?.results?.every((r: any) => r.pass)) {
 }
 console.log("[PASS] C Question: all test cases passed!");
 
-// --- TEST 2: Python Question Evaluation ---
-console.log("\n2. Testing Python Question (ID: 11, Sum and Average)...");
-const pySolution = `
-import sys
-
-def main():
-    lines = sys.stdin.read().split()
-    if not lines:
-        return
-    n = int(lines[0])
-    nums = [int(x) for x in lines[1:n+1]]
-    total = sum(nums)
-    avg = total / n
-    print(f"SUM: {total}")
-    print(f"AVG: {avg:.2f}")
-
-if __name__ == '__main__':
-    main()
-`;
+// --- TEST 3: Python Question Evaluation ---
+const testPyQMeta = pyQuestions[0];
+const pySolution = seedQuestions.find((q: any) => q.title === testPyQMeta.title && q.language === "python")?.answer || "";
+console.log(`\n3. Testing Python Question (ID: ${testPyQMeta.id}, "${testPyQMeta.title}")...`);
 
 t0 = performance.now();
 res = await fetch(`${API_BASE}/debug/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminToken}` },
-    body: JSON.stringify({ question_id: 11, source_code: pySolution, language: "python" })
+    body: JSON.stringify({ question_id: testPyQMeta.id, source_code: pySolution, language: "python" })
 });
 data = await res.json();
 elapsed = (performance.now() - t0).toFixed(1);
@@ -83,54 +73,32 @@ if (!data.result?.results?.every((r: any) => r.pass)) {
 }
 console.log("[PASS] Python Question: all test cases passed!");
 
-// --- TEST 3: Python String Palindrome ---
-console.log("\n3. Testing Python Question (ID: 12, String Palindrome)...");
-const pyPalSolution = `
-import sys
-w = sys.stdin.read().strip()
-print("YES" if w == w[::-1] else "NO")
-`;
-t0 = performance.now();
-res = await fetch(`${API_BASE}/debug/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminToken}` },
-    body: JSON.stringify({ question_id: 12, source_code: pyPalSolution, language: "python" })
-});
-data = await res.json();
-elapsed = (performance.now() - t0).toFixed(1);
-console.log(`Python Palindrome response in ${elapsed}ms:`, JSON.stringify(data));
-if (!data.result?.results?.every((r: any) => r.pass)) {
-    console.error("Python Palindrome failed!");
-    process.exit(1);
-}
-console.log("[PASS] Python Palindrome: all test cases passed!");
-
-// --- TEST 4: Wrong Answer Handling in Python ---
+// --- TEST 4: Python Wrong Answer Handling ---
 console.log("\n4. Testing Python Wrong Answer...");
 res = await fetch(`${API_BASE}/debug/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminToken}` },
-    body: JSON.stringify({ question_id: 11, source_code: "print('WRONG')", language: "python" })
+    body: JSON.stringify({ question_id: testPyQMeta.id, source_code: "print('INTENTIONALLY WRONG')", language: "python" })
 });
 data = await res.json();
 const allWrong = data.result?.results?.every((r: any) => !r.pass);
 console.log(`Correctly flagged as wrong: ${allWrong}`);
 if (!allWrong) process.exit(1);
 
-// --- TEST 5: Debug Questions API (checks language field returned) ---
-console.log("\n5. Testing GET /debug/question for language field...");
-res = await fetch(`${API_BASE}/debug/question`, {
+// --- TEST 5: Exam Levels Verification ---
+console.log("\n5. Verifying Exam Levels via GET /debug/level...");
+res = await fetch(`${API_BASE}/debug/level`, {
     headers: { Authorization: `Bearer ${adminToken}` }
 });
 data = await res.json();
-const questions = data.result || [];
-const hasC = questions.some((q: any) => q.language === "c");
-const hasPy = questions.some((q: any) => q.language === "python");
-console.log(`Questions API returned ${questions.length} questions. Has C: ${hasC}, Has Python: ${hasPy}`);
-if (!hasC || !hasPy) {
-    console.error("Missing language differentiation in questions API!");
+const levels = data.result || [];
+console.log(`Exam Levels in DB: ${levels.length}`);
+levels.forEach((l: any) => console.log(` - Level ${l.order_num}: "${l.name}" (${l.question_ids?.length} questions)`));
+
+if (levels.length < 8) {
+    console.error("Expected 8 exam levels!");
     process.exit(1);
 }
 
-console.log("\nALL DUAL-LANGUAGE (C & PYTHON) API TESTS PASSED SUCCESSFULLY 100%!");
+console.log("\nALL DUAL-LANGUAGE (C & PYTHON) 4-SET EXAM API TESTS PASSED SUCCESSFULLY 100%!");
 process.exit(0);
