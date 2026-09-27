@@ -5,7 +5,6 @@
   import Modal from "$lib/components/admin/Modal.svelte";
   import Table from "$lib/components/admin/Table.svelte";
   import Input from "$lib/components/admin/Input.svelte";
-  import CreatableSelect from "$lib/components/admin/CreatableSelect.svelte";
   import * as adminState from "$lib/admin_state.svelte";
   import * as ws from "$lib/ws.svelte";
   
@@ -58,9 +57,13 @@
       phone: ""
   });
 
+  function getAdminToken() {
+    return localStorage.getItem("admin_token") || localStorage.getItem("login_token") || "";
+  }
+
   async function fetchUniqueFields() {
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           if (!token) return;
           const res = await api("/user/fields", "GET", null, token);
           if (res) {
@@ -75,7 +78,7 @@
   async function fetchUsers() {
       loading = true;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           if (!token) return;
           
           let query = `/user?limit=${pageSize}&offset=${(currentPage - 1) * pageSize}`;
@@ -99,6 +102,12 @@
              totalUsers = 0;
           }
       } catch (e: any) {
+          if (e.message?.includes("Forbidden") || e.message?.includes("Unauthorized")) {
+              localStorage.removeItem("admin_token");
+              localStorage.removeItem("login_token");
+              window.location.href = "/admin/login";
+              return;
+          }
           error = e.message;
       } finally {
           loading = false;
@@ -114,7 +123,7 @@
       if (!confirm("Are you sure you want to delete this user?")) return;
       
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           await api(`/user?id=${id}`, "DELETE", null, token || "");
           // Refresh list
           fetchUsers();
@@ -132,7 +141,7 @@
   async function handleUpdateUser() {
       isSubmitting = true;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           await api("/user", "PUT", editingUser, token || "");
           isEditModalOpen = false;
           fetchUsers();
@@ -147,7 +156,7 @@
   async function handleAddUser() {
       isSubmitting = true;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           await api("/user", "POST", newUser, token || "");
           
           isAddModalOpen = false;
@@ -163,7 +172,7 @@
           if (e.message.toLowerCase().includes("booked") || e.message.toLowerCase().includes("disconnected")) {
              alert(`HOLD ON! ${e.message}`);
              // Re-fetch systems to refresh the list of available ones
-             const sysRes = await api("/system", "GET", null, localStorage.getItem("login_token") || "");
+             const sysRes = await api("/system", "GET", null, getAdminToken());
              if (Array.isArray(sysRes)) adminState.setSystems(sysRes);
           } else {
              alert(`Error creating user: ${e.message}`);
@@ -175,7 +184,7 @@
 
   async function fetchDebugLevels() {
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           const res = await api("/debug/level", "GET", null, token || "");
           debugLevels = res || [];
       } catch (e) { console.error(e); }
@@ -183,7 +192,7 @@
 
   async function fetchTypingLevels() {
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           const res = await api("/typing/level", "GET", null, token || "");
           typingLevels = res || [];
       } catch (e) { console.error(e); }
@@ -210,7 +219,7 @@
       fetchTypingLevels();
 
       // Ensure systems are synced via WS
-      const token = localStorage.getItem("login_token");
+      const token = getAdminToken();
       if (token && !ws.state.connected) ws.connect(token);
   });
 
@@ -343,42 +352,72 @@
     isOpen={isAddModalOpen} 
     onClose={() => isAddModalOpen = false} 
     title="Add New User"
+    maxWidth="max-w-xl"
   >
     <form onsubmit={(e) => { e.preventDefault(); handleAddUser(); }} class="space-y-4">
       <Input label="Name" bind:value={newUser.name} placeholder="John Doe" required />
       
+      <!-- Role Toggle -->
       <div class="w-full">
-         <label class="flex flex-col gap-1.5 w-full">
-             <span class="text-sm font-medium text-gray-700">Role <span class="text-red-500">*</span></span>
-             <select bind:value={newUser.role} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
-                 <option value="member">Member</option>
-                 <option value="lead">Lead</option>
-             </select>
-         </label>
+         <span class="text-sm font-medium text-gray-700 block mb-1.5">Role <span class="text-red-500">*</span></span>
+         <div class="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-lg border border-gray-200">
+             <button 
+                 type="button" 
+                 onclick={() => newUser.role = 'member'}
+                 class="py-2 text-sm font-medium rounded-md transition-all {newUser.role === 'member' ? 'bg-white text-gray-900 shadow-sm font-semibold' : 'text-gray-600 hover:text-gray-900'}"
+             >
+                 Member
+             </button>
+             <button 
+                 type="button" 
+                 onclick={() => newUser.role = 'lead'}
+                 class="py-2 text-sm font-medium rounded-md transition-all {newUser.role === 'lead' ? 'bg-white text-gray-900 shadow-sm font-semibold' : 'text-gray-600 hover:text-gray-900'}"
+             >
+                 Lead
+             </button>
+         </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
          <Input label="Year" type="number" bind:value={newUser.year} required />
          
          <div class="w-full">
-            <span class="text-sm font-medium text-gray-700 block mb-1.5">Branch <span class="text-red-500">*</span></span>
-            <CreatableSelect 
-                options={availableBranches} 
-                bind:value={newUser.branch} 
-                placeholder="Search or add branch..." 
-                required 
-            />
+            <label class="flex flex-col gap-1.5 w-full">
+                <span class="text-sm font-medium text-gray-700">Branch <span class="text-red-500">*</span></span>
+                <input 
+                    type="text" 
+                    list="branch-list-new"
+                    bind:value={newUser.branch} 
+                    placeholder="e.g. CSE, ECE, IT" 
+                    required
+                    class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-all duration-200"
+                />
+                <datalist id="branch-list-new">
+                    {#each availableBranches as b}
+                        <option value={b}></option>
+                    {/each}
+                </datalist>
+            </label>
          </div>
       </div>
 
       <div class="w-full">
-        <span class="text-sm font-medium text-gray-700 block mb-1.5">College <span class="text-red-500">*</span></span>
-        <CreatableSelect 
-            options={availableColleges} 
-            bind:value={newUser.college} 
-            placeholder="Search or add college..." 
-            required 
-        />
+        <label class="flex flex-col gap-1.5 w-full">
+            <span class="text-sm font-medium text-gray-700">College <span class="text-red-500">*</span></span>
+            <input 
+                type="text" 
+                list="college-list-new"
+                bind:value={newUser.college} 
+                placeholder="e.g. ABC College of Engineering" 
+                required
+                class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-all duration-200"
+            />
+            <datalist id="college-list-new">
+                {#each availableColleges as c}
+                    <option value={c}></option>
+                {/each}
+            </datalist>
+        </label>
       </div>
 
       <Input label="Phone" bind:value={newUser.phone} placeholder="1234567890" required />
@@ -461,42 +500,72 @@
     isOpen={isEditModalOpen} 
     onClose={() => isEditModalOpen = false} 
     title="Edit User"
+    maxWidth="max-w-xl"
   >
     <form onsubmit={(e) => { e.preventDefault(); handleUpdateUser(); }} class="space-y-4">
       <Input label="Name" bind:value={editingUser.name} placeholder="John Doe" required />
       
+      <!-- Role Toggle -->
       <div class="w-full">
-         <label class="flex flex-col gap-1.5 w-full">
-             <span class="text-sm font-medium text-gray-700">Role <span class="text-red-500">*</span></span>
-             <select bind:value={editingUser.role} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
-                 <option value="member">Member</option>
-                 <option value="lead">Lead</option>
-             </select>
-         </label>
+         <span class="text-sm font-medium text-gray-700 block mb-1.5">Role <span class="text-red-500">*</span></span>
+         <div class="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-lg border border-gray-200">
+             <button 
+                 type="button" 
+                 onclick={() => editingUser.role = 'member'}
+                 class="py-2 text-sm font-medium rounded-md transition-all {editingUser.role === 'member' ? 'bg-white text-gray-900 shadow-sm font-semibold' : 'text-gray-600 hover:text-gray-900'}"
+             >
+                 Member
+             </button>
+             <button 
+                 type="button" 
+                 onclick={() => editingUser.role = 'lead'}
+                 class="py-2 text-sm font-medium rounded-md transition-all {editingUser.role === 'lead' ? 'bg-white text-gray-900 shadow-sm font-semibold' : 'text-gray-600 hover:text-gray-900'}"
+             >
+                 Lead
+             </button>
+         </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
          <Input label="Year" type="number" bind:value={editingUser.year} required />
          
          <div class="w-full">
-            <span class="text-sm font-medium text-gray-700 block mb-1.5">Branch <span class="text-red-500">*</span></span>
-            <CreatableSelect 
-                options={availableBranches} 
-                bind:value={editingUser.branch} 
-                placeholder="Search or add branch..." 
-                required 
-            />
+            <label class="flex flex-col gap-1.5 w-full">
+                <span class="text-sm font-medium text-gray-700">Branch <span class="text-red-500">*</span></span>
+                <input 
+                    type="text" 
+                    list="branch-list-edit"
+                    bind:value={editingUser.branch} 
+                    placeholder="e.g. CSE, ECE, IT" 
+                    required
+                    class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-all duration-200"
+                />
+                <datalist id="branch-list-edit">
+                    {#each availableBranches as b}
+                        <option value={b}></option>
+                    {/each}
+                </datalist>
+            </label>
          </div>
       </div>
 
       <div class="w-full">
-        <span class="text-sm font-medium text-gray-700 block mb-1.5">College <span class="text-red-500">*</span></span>
-        <CreatableSelect 
-            options={availableColleges} 
-            bind:value={editingUser.college} 
-            placeholder="Search or add college..." 
-            required 
-        />
+        <label class="flex flex-col gap-1.5 w-full">
+            <span class="text-sm font-medium text-gray-700">College <span class="text-red-500">*</span></span>
+            <input 
+                type="text" 
+                list="college-list-edit"
+                bind:value={editingUser.college} 
+                placeholder="e.g. ABC College of Engineering" 
+                required
+                class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-all duration-200"
+            />
+            <datalist id="college-list-edit">
+                {#each availableColleges as c}
+                    <option value={c}></option>
+                {/each}
+            </datalist>
+        </label>
       </div>
 
       <Input label="Phone" bind:value={editingUser.phone} placeholder="1234567890" required />

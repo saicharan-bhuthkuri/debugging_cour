@@ -90,10 +90,21 @@
                 }
 
                 // Perform Initial "System Claim" Login (No OTP)
-                const existingToken = localStorage.getItem("login_token") || "";
+                const existingToken = localStorage.getItem("system_token") || localStorage.getItem("login_token") || "";
                 const token = await api("/login", "POST", { systemNumber: code }, existingToken);
                 if (token) {
-                    setToken(token); // Store token
+                    localStorage.setItem("system_token", token);
+                    let isAdmin = false;
+                    const curToken = localStorage.getItem("login_token");
+                    if (curToken) {
+                        try {
+                            const p = JSON.parse(atob(curToken.split('.')[1]));
+                            if (p.role === 'admin' || p.role === 'superadmin') isAdmin = true;
+                        } catch {}
+                    }
+                    if (!isAdmin) {
+                        setToken(token); // Store token only if not admin
+                    }
                     ws.connect(token); // Connect WS immediately
                     
                     // Optimistically set status to ONLINE as we are now active

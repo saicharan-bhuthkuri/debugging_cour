@@ -16,34 +16,48 @@
   let isMobileMenuOpen = $state(false);
   let userRole = $state("admin");
 
-  onMount(() => {
-    const token = localStorage.getItem("login_token");
+  function checkAdminAuth() {
+    if (typeof localStorage === 'undefined') return;
     const isLoginRoute = page.url.pathname.includes("/admin/login");
+    const token = localStorage.getItem("admin_token") || localStorage.getItem("login_token");
 
+    if (!token) {
+      if (!isLoginRoute) goto("/admin/login");
+      return;
+    }
+
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload.role !== 'admin' && payload.role !== 'superadmin') {
+        localStorage.removeItem("admin_token");
+        localStorage.removeItem("login_token");
+        if (!isLoginRoute) goto("/admin/login");
+        return;
+      }
+      userRole = payload.role;
+      isAdmin = true;
+      ws.connect(token);
+    } catch {
+      localStorage.removeItem("admin_token");
+      localStorage.removeItem("login_token");
+      if (!isLoginRoute) goto("/admin/login");
+    }
+  }
+
+  onMount(() => {
     // Restore sidebar state
     const savedSidebarState = localStorage.getItem("admin_sidebar_collapsed");
     if (savedSidebarState) {
         isSidebarCollapsed = savedSidebarState === "true";
     }
+    checkAdminAuth();
+  });
 
-    if (!token && !isLoginRoute) {
-      goto("/admin/login");
-    } else if (token) {
-        try {
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            if (payload.role !== 'admin' && payload.role !== 'superadmin') {
-                localStorage.removeItem("login_token");
-                if (!isLoginRoute) goto("/admin/login");
-                return;
-            }
-            userRole = payload.role;
-            isAdmin = true;
-            // Connect to WebSocket
-            ws.connect(token);
-        } catch (e) {
-            localStorage.removeItem("login_token");
-            if (!isLoginRoute) goto("/admin/login");
-        }
+  // Re-check whenever route changes
+  $effect(() => {
+    const currentPath = page.url.pathname;
+    if (typeof localStorage !== 'undefined' && !currentPath.includes("/admin/login")) {
+      checkAdminAuth();
     }
   });
 

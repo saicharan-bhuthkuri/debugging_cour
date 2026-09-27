@@ -24,6 +24,7 @@
         const user = JSON.parse(payload);
         
         if (user.role == "admin" || user.role == "superadmin"){
+          localStorage.setItem("admin_token", token);
           setToken(token);
           goto("/admin/users");
         } else {

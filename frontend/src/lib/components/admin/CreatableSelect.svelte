@@ -46,31 +46,30 @@
     const target = e.target as HTMLInputElement;
     inputValue = target.value;
     isOpen = true;
-    // Reset value if user changes input, forcing them to re-select or click add
-    if (value && value !== inputValue) {
-        value = ""; 
+    if (creatable) {
+        value = target.value;
+        error = "";
+    } else {
+        if (value && value !== inputValue) {
+            value = ""; 
+        }
     }
   }
 
   function handleBlur(e: FocusEvent) {
-      // Small delay to allow click event on dropdown items to process
       setTimeout(() => {
           isOpen = false;
-          // If value was cleared (because of typing) and no new selection made,
-          // check if we should revert or leave empty.
-          // Requirement: "throw error if not clicked on add new"
-          // We'll leave value as empty string if they typed but didn't select/add.
-          // The parent form validation will handle the "required" error or we can show local error
-          if (inputValue && !value) {
-             // If they typed something but didn't select
+          if (creatable && inputValue) {
+              value = inputValue.trim();
+              error = "";
+          } else if (inputValue && !value) {
              if (!creatable) {
-                // If strictly selecting, check if input matches an option exactly
                 const exactMatch = options.find((opt: string) => opt.toLowerCase() === inputValue.toLowerCase());
                 if (exactMatch) {
                     value = exactMatch;
                     inputValue = exactMatch;
                 } else {
-                    inputValue = ""; // Clear invalid input
+                    inputValue = "";
                 }
              }
           } else if (!inputValue) {

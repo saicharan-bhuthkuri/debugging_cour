@@ -12,8 +12,19 @@ export async function api(path: string, method: string = "GET", body: any = null
 		"Content-Type": "application/json",
 	};
 
-	if (token) {
-		headers["Authorization"] = `Bearer ${token}`;
+	let resolvedToken = token;
+	if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) {
+		const adminTok = localStorage.getItem("admin_token");
+		if (adminTok) {
+			resolvedToken = adminTok;
+		}
+	}
+	if (!resolvedToken && typeof localStorage !== "undefined") {
+		resolvedToken = localStorage.getItem("admin_token") || localStorage.getItem("login_token") || "";
+	}
+
+	if (resolvedToken) {
+		headers["Authorization"] = `Bearer ${resolvedToken}`;
 	}
 
 	const options: RequestInit = {
@@ -35,6 +46,14 @@ export async function api(path: string, method: string = "GET", body: any = null
 		const data = await res.json();
 
 		if (!res.ok) {
+			if ((res.status === 401 || res.status === 403) && typeof window !== "undefined") {
+				const isLoginRoute = window.location.pathname.includes("/admin/login") || window.location.pathname === "/login";
+				if (!isLoginRoute && window.location.pathname.startsWith("/admin")) {
+					localStorage.removeItem("login_token");
+					localStorage.removeItem("admin_token");
+					window.location.href = "/admin/login";
+				}
+			}
 			throw new Error(data.error || data.message || "API Error");
 		}
 

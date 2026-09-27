@@ -80,10 +80,23 @@
     return null;
   }
 
+  function getAdminToken() {
+    return localStorage.getItem("admin_token") || localStorage.getItem("login_token") || "";
+  }
+
+  let copiedSnippet = $state(false);
+  function copyPreviewCode(code: string) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(code);
+      copiedSnippet = true;
+      setTimeout(() => copiedSnippet = false, 2000);
+    }
+  }
+
   async function fetchQuestions() {
       loading = true;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           if (!token) return;
           
           const res = await api("/debug/question", "GET", null, token);
@@ -103,7 +116,7 @@
   async function handleAddQuestion() {
       isSubmitting = true;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           const payload = {
               ...newQuestion,
               answer_meta: buildAnswerMeta(newQuestion.question_type, 
@@ -143,7 +156,7 @@
       if (!editingQuestion) return;
       isSubmitting = true;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           const payload = {
               ...editingQuestion,
               answer_meta: buildAnswerMeta(editingQuestion.question_type,
@@ -162,7 +175,7 @@
   async function handleDelete(id: number) {
       if (!confirm("Are you sure you want to delete this question?")) return;
       try {
-          const token = localStorage.getItem("login_token");
+          const token = getAdminToken();
           await api(`/debug/question?id=${id}`, "DELETE", null, token || "");
           fetchQuestions();
       } catch (e: any) {
@@ -393,7 +406,7 @@
   {/if}
 
   <!-- Add Question Modal -->
-  <Modal isOpen={isAddModalOpen} onClose={() => isAddModalOpen = false} title="Add New Question">
+  <Modal isOpen={isAddModalOpen} onClose={() => isAddModalOpen = false} title="Add New Question" maxWidth="max-w-3xl">
     <form onsubmit={(e) => { e.preventDefault(); handleAddQuestion(); }} class="space-y-4">
       <Input label="Title" bind:value={newQuestion.title} placeholder="e.g. Infinite Loop" required />
       
@@ -486,7 +499,7 @@
   </Modal>
 
   <!-- Edit Question Modal -->
-  <Modal isOpen={isEditModalOpen} onClose={() => isEditModalOpen = false} title="Edit Question">
+  <Modal isOpen={isEditModalOpen} onClose={() => isEditModalOpen = false} title="Edit Question" maxWidth="max-w-3xl">
       {#if editingQuestion}
         <form onsubmit={(e) => { e.preventDefault(); handleUpdateQuestion(); }} class="space-y-4">
         <Input label="Title" bind:value={editingQuestion.title} required />
@@ -581,37 +594,130 @@
   </Modal>
 
   <!-- Preview Modal -->
-  <Modal isOpen={isPreviewOpen} onClose={() => isPreviewOpen = false} title="Question Preview">
+  <Modal isOpen={isPreviewOpen} onClose={() => isPreviewOpen = false} title="Question Preview" maxWidth="max-w-4xl">
     {#if previewQuestion}
       {@const info = getTypeInfo(previewQuestion.question_type || 'full_edit')}
       {@const colorMap = { cyan: 'bg-cyan-50 text-cyan-700 border-cyan-200', red: 'bg-red-50 text-red-700 border-red-200', green: 'bg-green-50 text-green-700 border-green-200', yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200' }}
-      <div class="space-y-4">
-        <div class="flex items-center gap-3">
-          <h3 class="text-lg font-bold text-gray-900">{previewQuestion.title}</h3>
-          <span class="text-xs px-2 py-1 rounded-full border font-mono font-semibold {colorMap[info.color as keyof typeof colorMap]}">{info.label}</span>
-        </div>
-        <p class="text-sm text-gray-600">{previewQuestion.description}</p>
-        
-        <div class="relative">
-          <div class="text-xs font-mono text-gray-500 mb-2">Code Preview:</div>
-          <div class="bg-gray-900 rounded-lg p-4 overflow-x-auto">
-            <pre class="text-sm font-mono text-gray-300 leading-relaxed">{#each getCodeLines(previewQuestion.code_snippet || '') as line, i}<div class="flex gap-3 hover:bg-white/5 px-2 py-0.5 rounded {previewQuestion.answer_meta?.buggy_lines?.includes(i+1) ? 'bg-red-500/10 border-l-2 border-red-500' : ''} {previewQuestion.answer_meta?.editable_lines?.includes(i+1) ? 'bg-yellow-500/10 border-l-2 border-yellow-500' : ''}"><span class="text-gray-600 select-none w-6 text-right">{i+1}</span><span>{line || ' '}</span></div>{/each}</pre>
+      {@const diffColors = { easy: 'bg-emerald-50 text-emerald-700 border-emerald-200', medium: 'bg-amber-50 text-amber-700 border-amber-200', hard: 'bg-rose-50 text-rose-700 border-rose-200' }}
+      <div class="space-y-5">
+        <!-- Header Info Card -->
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="text-lg font-bold text-gray-900">{previewQuestion.title}</h3>
+              <span class="text-xs px-2.5 py-0.5 rounded-full border font-mono font-semibold {colorMap[info.color as keyof typeof colorMap] || 'bg-gray-100'}">
+                {info.label}
+              </span>
+              <span class="text-xs px-2.5 py-0.5 rounded-full border font-mono font-semibold uppercase {diffColors[previewQuestion.difficulty as keyof typeof diffColors] || 'bg-gray-100'}">
+                {previewQuestion.difficulty}
+              </span>
+              {#if previewQuestion.language === 'python'}
+                <span class="text-xs px-2.5 py-0.5 rounded-full border font-mono font-semibold bg-amber-50 text-amber-800 border-amber-200">
+                  Python 3
+                </span>
+              {:else}
+                <span class="text-xs px-2.5 py-0.5 rounded-full border font-mono font-semibold bg-blue-50 text-blue-800 border-blue-200">
+                  C (C99)
+                </span>
+              {/if}
+            </div>
+            {#if previewQuestion.set_name}
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Set: <span class="text-gray-800 font-bold">{previewQuestion.set_name}</span>
+              </div>
+            {/if}
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              onclick={() => { const q = previewQuestion; isPreviewOpen = false; openEditModal(q); }}
+              class="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+              </svg>
+              Edit Question
+            </button>
           </div>
         </div>
 
+        <!-- Description -->
+        {#if previewQuestion.description}
+          <div>
+            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Description</div>
+            <div class="text-sm text-gray-700 bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm leading-relaxed whitespace-pre-wrap">
+              {previewQuestion.description}
+            </div>
+          </div>
+        {/if}
+        
+        <!-- Code Preview -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+              <span>Code Snippet</span>
+              <span class="text-[11px] font-mono font-normal text-gray-400">({getCodeLines(previewQuestion.code_snippet || '').length} lines)</span>
+            </div>
+            <button 
+              type="button" 
+              onclick={() => copyPreviewCode(previewQuestion.code_snippet || '')} 
+              class="text-xs text-gray-500 hover:text-gray-800 flex items-center gap-1 font-mono transition-colors"
+            >
+              {#if copiedSnippet}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-emerald-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                <span class="text-emerald-600 font-semibold">Copied!</span>
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                <span>Copy Code</span>
+              {/if}
+            </button>
+          </div>
+          <div class="bg-[#0f172a] rounded-xl p-4 overflow-x-auto border border-slate-800 shadow-inner max-h-[380px] overflow-y-auto">
+            <pre class="text-xs font-mono text-slate-200 leading-relaxed min-w-full">{#each getCodeLines(previewQuestion.code_snippet || '') as line, i}<div class="flex gap-4 hover:bg-white/5 px-2 py-0.5 rounded transition-colors {previewQuestion.answer_meta?.buggy_lines?.includes(i+1) ? 'bg-rose-500/20 border-l-2 border-rose-500 text-rose-200' : ''} {previewQuestion.answer_meta?.editable_lines?.includes(i+1) ? 'bg-amber-500/20 border-l-2 border-amber-500 text-amber-200' : ''}"><span class="text-slate-500 select-none w-8 text-right shrink-0">{i+1}</span><span class="whitespace-pre">{line || ' '}</span></div>{/each}</pre>
+          </div>
+        </div>
+
+        <!-- Answer Meta if present -->
+        {#if previewQuestion.answer_meta}
+          {#if previewQuestion.question_type === 'find_buggy_line' && previewQuestion.answer_meta.buggy_lines?.length}
+            <div class="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center gap-3">
+              <span class="text-xs font-bold text-rose-700 uppercase tracking-wide">Buggy Lines (Answer Key):</span>
+              <div class="flex flex-wrap gap-1.5">
+                {#each previewQuestion.answer_meta.buggy_lines as ln}
+                  <span class="px-2 py-0.5 bg-rose-200 text-rose-800 rounded font-mono font-bold text-xs">Line {ln}</span>
+                {/each}
+              </div>
+            </div>
+          {:else if previewQuestion.question_type === 'missing_lines' && previewQuestion.answer_meta.editable_lines?.length}
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
+              <span class="text-xs font-bold text-amber-700 uppercase tracking-wide">Editable Missing Lines:</span>
+              <div class="flex flex-wrap gap-1.5">
+                {#each previewQuestion.answer_meta.editable_lines as ln}
+                  <span class="px-2 py-0.5 bg-amber-200 text-amber-800 rounded font-mono font-bold text-xs">Line {ln}</span>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        {/if}
+
+        <!-- Test Cases -->
         {#if previewQuestion.test_cases && previewQuestion.test_cases.length > 0}
-          <div class="space-y-2">
-            <div class="text-xs font-mono text-gray-500">Test Cases ({previewQuestion.test_cases.length}):</div>
-            <div class="grid grid-cols-1 gap-2">
-              {#each previewQuestion.test_cases as tc}
-                <div class="text-[10px] font-mono bg-gray-50 p-2 rounded border flex flex-col gap-1">
-                  <div class="flex gap-2">
-                    <span class="text-blue-500 font-bold w-12">IN:</span>
-                    <span class="text-gray-700 whitespace-pre-wrap">{tc.input || '(none)'}</span>
+          <div>
+            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Test Cases ({previewQuestion.test_cases.length})</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-56 overflow-y-auto pr-1">
+              {#each previewQuestion.test_cases as tc, idx}
+                <div class="font-mono bg-gray-50 p-3 rounded-xl border border-gray-200 flex flex-col gap-2 shadow-sm text-xs">
+                  <div class="flex items-center justify-between border-b border-gray-200 pb-1 text-gray-600 font-semibold">
+                    <span>Test Case #{idx + 1}</span>
                   </div>
-                  <div class="flex gap-2">
-                    <span class="text-green-500 font-bold w-12">OUT:</span>
-                    <span class="text-gray-700 whitespace-pre-wrap">{tc.output || '(none)'}</span>
+                  <div class="space-y-1.5">
+                    <div>
+                      <span class="text-blue-600 font-bold block text-[11px]">INPUT:</span>
+                      <pre class="bg-white p-2 rounded border border-gray-200 text-gray-800 whitespace-pre-wrap mt-0.5 text-xs">{tc.input || '(no input)'}</pre>
+                    </div>
+                    <div>
+                      <span class="text-emerald-600 font-bold block text-[11px]">EXPECTED OUTPUT:</span>
+                      <pre class="bg-white p-2 rounded border border-gray-200 text-gray-800 whitespace-pre-wrap mt-0.5 text-xs">{tc.output || '(no output)'}</pre>
+                    </div>
                   </div>
                 </div>
               {/each}
@@ -619,11 +725,13 @@
           </div>
         {/if}
 
-        {#if previewQuestion.answer_meta}
-          <div class="text-xs font-mono text-gray-500 p-3 bg-gray-50 rounded-lg border">
-            <strong>Answer Meta:</strong> {JSON.stringify(previewQuestion.answer_meta)}
-          </div>
-        {/if}
+        <!-- Footer -->
+        <div class="pt-3 border-t border-gray-100 flex justify-end gap-3">
+          <Button variant="secondary" onclick={() => isPreviewOpen = false}>Close</Button>
+          <Button onclick={() => { const q = previewQuestion; isPreviewOpen = false; openEditModal(q); }}>
+            Edit Question
+          </Button>
+        </div>
       </div>
     {/if}
   </Modal>
