@@ -29,16 +29,20 @@
     if (!token && !isLoginRoute) {
       goto("/admin/login");
     } else if (token) {
-        isAdmin = true;
-        
-        // Connect to WebSocket
-        ws.connect(token);
-
         try {
             const payload = JSON.parse(atob(token.split('.')[1]));
-            userRole = payload.role || 'admin';
+            if (payload.role !== 'admin' && payload.role !== 'superadmin') {
+                localStorage.removeItem("login_token");
+                if (!isLoginRoute) goto("/admin/login");
+                return;
+            }
+            userRole = payload.role;
+            isAdmin = true;
+            // Connect to WebSocket
+            ws.connect(token);
         } catch (e) {
-            userRole = 'admin';
+            localStorage.removeItem("login_token");
+            if (!isLoginRoute) goto("/admin/login");
         }
     }
   });

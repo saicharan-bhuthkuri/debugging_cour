@@ -5,7 +5,7 @@
     onClose: () => void;
     children: any;
   }
-  let { isOpen, title, onClose, children } = $props<Props>();
+  let { isOpen, title, onClose, children }: Props = $props();
 </script>
 
 {#if isOpen}

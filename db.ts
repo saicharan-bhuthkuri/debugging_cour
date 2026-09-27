@@ -5,6 +5,10 @@ const db = new SQL("sqlite://db.sqlite");
 
 export async function initDB() {
     try {
+        await db`PRAGMA journal_mode = WAL;`;
+        await db`PRAGMA busy_timeout = 5000;`;
+        await db`PRAGMA synchronous = NORMAL;`;
+
         await db`CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
@@ -93,12 +97,20 @@ export async function initDB() {
             PRIMARY KEY (session_id, question_id)
         )`;
 
+        // Performance Indexes
+        await db`CREATE INDEX IF NOT EXISTS idx_logs_session_type ON system_logs(exam_session_id, log_type)`;
+        await db`CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON system_logs(timestamp)`;
+        await db`CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON exam_sessions(user_id, status)`;
+        await db`CREATE INDEX IF NOT EXISTS idx_systems_status ON systems(status)`;
+        await db`CREATE INDEX IF NOT EXISTS idx_users_role_name ON users(role, name)`;
+
         // Check for default super admin
         const superAdmins = await db`SELECT * FROM users WHERE role = 'superadmin' LIMIT 1`;
         if (superAdmins.length === 0) {
             console.log("Creating default superadmin...");
+            const hashedPassword = await Bun.password.hash("bankai", { algorithm: "argon2id" });
             await db`INSERT INTO users (name, role, year, branch, college, phone, password)
-                VALUES ('fayaz', 'superadmin', 0, 'ADMIN', 'ADMIN', '0000000000', 'bankai')`;
+                VALUES ('fayaz', 'superadmin', 0, 'ADMIN', 'ADMIN', '0000000000', ${hashedPassword})`;
         }
 
     } catch (error) {
@@ -120,8 +132,12 @@ export async function resetSystemsStatusOnStart() {
 
 export async function createUser(user: User) {
     try {
+        let pass = user.password;
+        if (pass && !pass.startsWith("$argon2id$")) {
+            pass = await Bun.password.hash(pass, { algorithm: "argon2id" });
+        }
         await db`INSERT INTO users (name, role, year, branch, college, phone, password)
-            VALUES (${user.name}, ${user.role}, ${user.year}, ${user.branch}, ${user.college}, ${user.phone}, ${user.password})`;
+            VALUES (${user.name}, ${user.role}, ${user.year}, ${user.branch}, ${user.college}, ${user.phone}, ${pass})`;
         return {}
     } catch (error) {
         if (error instanceof SQL.SQLiteError) {
@@ -164,7 +180,7 @@ export async function getAllUsers(options: {
         // Note: Bun's SQL might not support complex dynamic queries easily with template tags if we want to conditionally add WHERE clauses.
         // Using the "OR IS NULL" pattern is a safe way to handle optional params in raw SQL.
 
-        const users = (await db`SELECT * FROM users WHERE 
+        const users = (await db`SELECT id, name, role, year, branch, college, phone, created_at FROM users WHERE 
             (${options.college} IS NULL OR college = ${options.college}) AND
             (${options.branch} IS NULL OR branch = ${options.branch}) AND
             (${options.role} IS NULL OR role = ${options.role}) AND
@@ -188,6 +204,24 @@ export async function getAllUsers(options: {
     }
 }
 
+export async function getUserAuth(name: string) {
+    try {
+        const users = (await db`SELECT id, name, role, year, branch, college, phone, password FROM users WHERE name = ${name}`) as (WithID<User> & { password?: string })[];
+        return { user: users[0] || null };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error", user: null };
+    }
+}
+
+export async function updateUserPassword(id: number, passwordHash: string) {
+    try {
+        await db`UPDATE users SET password = ${passwordHash} WHERE id = ${id}`;
+        return { success: true };
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+}
+
 export async function getUniqueUserFields() {
     try {
         const colleges = await db`SELECT DISTINCT college FROM users WHERE college IS NOT NULL AND college != '' ORDER BY college`;
@@ -203,7 +237,7 @@ export async function getUniqueUserFields() {
 
 export async function getUserById(id: number) {
     try {
-        const users = (await db`SELECT * FROM users WHERE id = ${id}`) as WithID<User>[];
+        const users = (await db`SELECT id, name, role, year, branch, college, phone, created_at FROM users WHERE id = ${id}`) as WithID<User>[];
         return { users };
     } catch (error) {
         return { error: error instanceof Error ? error.message : "Unknown error" };
@@ -366,6 +400,22 @@ export async function getSystemById(id: number) {
 }
 
 // --- DEBUG ---
+
+export async function getStudentQuestions(levelId?: number | null) {
+    try {
+        if (levelId) {
+            const { level } = await getDebugLevelById(levelId);
+            if (level && Array.isArray(level.question_ids) && level.question_ids.length > 0) {
+                const allQ = await db`SELECT id, title, description, code_snippet, difficulty, question_type FROM debug_questions`;
+                const idSet = new Set(level.question_ids);
+                const questions = allQ.filter((q: any) => idSet.has(q.id));
+                return { questions };
+            }
+        }
+        const questions = await db`SELECT id, title, description, code_snippet, difficulty, question_type FROM debug_questions`;
+        return { questions };
+    } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
+}
 
 export async function getAllDebugQuestions() {
     try {
@@ -546,14 +596,34 @@ export async function getTypingResults(options: {
 
         if (sessions.length === 0) return { results: [] };
 
+        const allLogs = await db`SELECT * FROM system_logs 
+            WHERE exam_session_id IN (
+                SELECT es.id FROM exam_sessions es
+                LEFT JOIN users u ON es.user_id = u.id
+                LEFT JOIN systems s ON es.system_id = s.id
+                WHERE es.exam_mode = 'typing' AND
+                    (${college} IS NULL OR u.college = ${college}) AND
+                    (${branch} IS NULL OR u.branch = ${branch}) AND
+                    (${year} IS NULL OR u.year = ${year}) AND
+                    (${levelId} IS NULL OR s.assigned_level_id = ${levelId}) AND
+                    (${status} IS NULL OR es.status = ${status})
+            ) 
+            AND log_type = 'TYPING_RESULT'
+            ORDER BY timestamp ASC`;
+
+        const logsBySession = new Map<number, any[]>();
+        for (const log of allLogs) {
+            if (!logsBySession.has(log.exam_session_id)) {
+                logsBySession.set(log.exam_session_id, []);
+            }
+            logsBySession.get(log.exam_session_id)!.push(log);
+        }
+
         const results: any[] = [];
 
         for (const session of sessions) {
             // Get TYPING_RESULT logs for this session
-            const logs = await db`SELECT * FROM system_logs 
-                WHERE exam_session_id = ${session.id} 
-                AND log_type = 'TYPING_RESULT'
-                ORDER BY timestamp ASC`;
+            const logs = logsBySession.get(session.id) || [];
 
             const attempts: any[] = [];
             let bestWpm = 0;
@@ -954,17 +1024,11 @@ export async function gradeSubmission(sessionId: number, questionId: number, isC
             ON CONFLICT(session_id, question_id) 
             DO UPDATE SET is_correct = ${val}`;
 
-        // Also update the score in exam_sessions for persistence/stat purposes if needed
-        // But we calculate it on the fly currently in getExamResults.
-        // Let's also update it in the session table for easy access.
-
-        const { results } = await getExamResults({ exam_mode: undefined }); // Trigger calculation
-        if (results) {
-            const sessionResult = results.find((r: any) => r.session_id === sessionId);
-            if (sessionResult) {
-                await db`UPDATE exam_sessions SET score = ${sessionResult.total_score} WHERE id = ${sessionId}`;
-            }
-        }
+        // Localized score update for this session only (no global DB scan)
+        await db`UPDATE exam_sessions SET score = (
+            SELECT COALESCE(SUM(CASE WHEN is_correct = 1 THEN 10 ELSE 0 END), 0)
+            FROM debug_submission_grades WHERE session_id = ${sessionId}
+        ) WHERE id = ${sessionId}`;
 
         return { success: true };
     } catch (error) {

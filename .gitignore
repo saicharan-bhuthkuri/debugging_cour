@@ -2,7 +2,7 @@
 node_modules
 
 build/
-db.sqlite
+db.sqlite*
 main.exe
 main
 

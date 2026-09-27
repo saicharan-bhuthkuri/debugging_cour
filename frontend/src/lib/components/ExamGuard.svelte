@@ -159,7 +159,7 @@
     function startDisqualifyCountdown() {
         if (countdownTimer || isDisqualifying) return;
 
-        countdown = 5;
+        countdown = 10;
         showCountdownOverlay = true;
 
         countdownTimer = setInterval(() => {
@@ -178,7 +178,7 @@
             countdownTimer = null;
         }
         showCountdownOverlay = false;
-        countdown = 5;
+        countdown = 10;
     }
 
     async function disqualify() {

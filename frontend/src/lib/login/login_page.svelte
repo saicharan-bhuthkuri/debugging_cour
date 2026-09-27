@@ -33,12 +33,12 @@
         on_logout
     }: LoginPageProps = $props();
 
-    let step = $state(initialSystemNumber ? 2 : 1);
-    let systemNumber = $state(initialSystemNumber);
+    let step = $state(1);
+    let systemNumber = $state("");
     let otp = $state("");
 
     $effect(() => {
-        if (initialSystemNumber && step === 1) {
+        if (initialSystemNumber) {
              systemNumber = initialSystemNumber;
              step = 2;
         }

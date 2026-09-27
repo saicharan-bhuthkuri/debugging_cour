@@ -30,7 +30,7 @@ export interface User {
     password?: string;
 }
 
-const JWT_TOKEN = "miaow_trinity";
+const JWT_TOKEN = process.env.JWT_SECRET || "miaow_trinity";
 
 const secret = new TextEncoder().encode(JWT_TOKEN);
 
@@ -62,6 +62,40 @@ function resolveFile(pathname: string): string | null {
     return null;
 }
 
+let cachedZipData: Uint8Array | null = null;
+async function getZipData(): Promise<Uint8Array> {
+    if (!cachedZipData) {
+        cachedZipData = new Uint8Array(await Bun.file(wccfiles).arrayBuffer());
+    }
+    return cachedZipData;
+}
+
+// Semaphore to limit concurrent WCC compiler workers to 6
+class Semaphore {
+    private running = 0;
+    private queue: (() => void)[] = [];
+    constructor(private max: number) {}
+    async acquire(): Promise<() => void> {
+        if (this.running < this.max) {
+            this.running++;
+            return () => this.release();
+        }
+        return new Promise<() => void>((resolve) => {
+            this.queue.push(() => {
+                this.running++;
+                resolve(() => this.release());
+            });
+        });
+    }
+    private release() {
+        this.running--;
+        if (this.queue.length > 0) {
+            const next = this.queue.shift();
+            if (next) next();
+        }
+    }
+}
+const wccSemaphore = new Semaphore(6);
 
 async function evaluateCode(source_code: string, question_id: number) {
     const { question } = await db.getDebugQuestionById(question_id);
@@ -72,9 +106,10 @@ async function evaluateCode(source_code: string, question_id: number) {
     const testCases = question.test_cases;
     const results = [];
 
-    const zipData = await Bun.file(wccfiles).arrayBuffer();
+    const zip = await getZipData();
+    const release = await wccSemaphore.acquire();
     const runner = new WccRunner({
-        zip: new Uint8Array(zipData),
+        zip,
         workerURL: wasiWorkerURL as any
     });
 
@@ -104,6 +139,7 @@ async function evaluateCode(source_code: string, question_id: number) {
         }
     } finally {
         runner.terminate();
+        release();
     }
     return { results };
 }
@@ -192,6 +228,13 @@ const server = Bun.serve<WSData>({
             POST: handler(async req => {
                 const admin = await requireAdmin(req);
                 const data = await parseJSON<User & { system_id?: number, exam_type?: string, level_id?: number }>(req);
+
+                // Prevent non-superadmin from creating admin/superadmin accounts
+                if (data.role && (data.role === "admin" || data.role === "superadmin")) {
+                    if (admin.role !== "superadmin") {
+                        throw new HttpError("Forbidden: Only Super Admin can create admin accounts", 403);
+                    }
+                }
 
                 // Check if user exists
                 const existing = await db.userExists(data);
@@ -297,11 +340,23 @@ const server = Bun.serve<WSData>({
 
                 if (!cred.name || !cred.pass) throw new HttpError("Invalid credentials", 400);
 
-                // Check DB
-                const { users } = await db.getAllUsers({ limit: 1000, search: cred.name });
-                const user = users?.find(u => u.name === cred.name && u.password === cred.pass);
+                // Check DB with getUserAuth
+                const { user, error } = await db.getUserAuth(cred.name);
+                if (error || !user || !user.password) throw new HttpError("Invalid credentials", 401);
 
-                if (!user) throw new HttpError("Invalid credentials", 401);
+                let valid = false;
+                if (user.password.startsWith("$argon2id$")) {
+                    valid = await Bun.password.verify(cred.pass, user.password);
+                } else {
+                    valid = user.password === cred.pass;
+                    if (valid) {
+                        // Automatically migrate legacy plaintext password to Argon2id
+                        const hashed = await Bun.password.hash(cred.pass, { algorithm: "argon2id" });
+                        await db.updateUserPassword(user.id, hashed);
+                    }
+                }
+
+                if (!valid) throw new HttpError("Invalid credentials", 401);
 
                 if (user.role !== 'admin' && user.role !== 'superadmin') throw new HttpError("Forbidden", 403);
 
@@ -724,6 +779,14 @@ const server = Bun.serve<WSData>({
                     throw new HttpError("Unauthorized", 401);
                 }
 
+                // If student system terminal, omit answer_meta and test_cases
+                if (payload.role === "system") {
+                    const { system } = await db.getSystemByCode((payload as any).name);
+                    const { questions, error } = await db.getStudentQuestions(system?.assigned_level_id);
+                    if (error) throw new HttpError(error, 500);
+                    return Res(JSON.stringify({ result: questions }));
+                }
+
                 const { questions, error } = await db.getAllDebugQuestions();
                 if (error) throw new HttpError(error, 500);
                 return Res(JSON.stringify({ result: questions }));
@@ -764,6 +827,33 @@ const server = Bun.serve<WSData>({
                 const auth = req.headers.get("Authorization");
                 const { payload } = await verifyJWT(auth ?? "");
                 if (!payload) throw new HttpError("Unauthorized", 401);
+
+                // For systems, verify exam mode and time limit
+                if (payload.role === "system") {
+                    const { system } = await db.getSystemByCode((payload as any).name);
+                    if (!system) throw new HttpError("System not found", 404);
+                    if (system.status !== "exam") throw new HttpError("System is not in exam mode", 403);
+
+                    if (system.assigned_to) {
+                        const { sessions } = await db.getAllExamSessions({
+                            user_id: system.assigned_to,
+                            status: 'ongoing',
+                            limit: 1
+                        });
+                        if (sessions && sessions.length > 0) {
+                            const session = sessions[0];
+                            let duration = 900;
+                            if (system.assigned_level_id) {
+                                const { level } = await db.getDebugLevelById(system.assigned_level_id);
+                                if (level?.duration) duration = level.duration;
+                            }
+                            const elapsed = (Date.now() - new Date(session.start_time).getTime()) / 1000;
+                            if (elapsed > duration + 15) {
+                                throw new HttpError("Exam time limit exceeded", 403);
+                            }
+                        }
+                    }
+                }
 
                 const { source_code, question_id } = await parseJSON<any>(req);
                 if (!source_code || !question_id) throw new HttpError("Missing source_code or question_id", 400);
@@ -1193,6 +1283,8 @@ function handler(fn: (req: Request) => Promise<Response>) {
 async function signJWT(payload: JWTPayload) {
     return new SignJWT(payload)
         .setProtectedHeader({ alg: "HS256" })
+        .setIssuedAt()
+        .setExpirationTime("12h")
         .sign(secret);
 }
 
