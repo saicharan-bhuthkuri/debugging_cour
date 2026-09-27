@@ -7,6 +7,7 @@ import { wsManager, type WSData } from "./ws_server";
 import { WccRunner } from "./wcc-lib";
 import wccfiles from './wcc-lib/wccfiles.zip' with { type: "file" };
 import wasiWorkerURL from './wcc-lib/wasi_worker.js' with { type: "file" };
+import { execPythonBatch } from "./py-runner";
 
 await db.initDB();
 
@@ -97,15 +98,24 @@ class Semaphore {
 }
 const wccSemaphore = new Semaphore(6);
 
-async function evaluateCode(source_code: string, question_id: number) {
+async function evaluateCode(source_code: string, question_id: number, requestedLanguage?: string) {
     const { question } = await db.getDebugQuestionById(question_id);
     if (!question || !question.test_cases || (Array.isArray(question.test_cases) && question.test_cases.length === 0)) {
         return { results: [], message: "No test cases configured." };
     }
 
     const testCases = question.test_cases;
-    const results = [];
 
+    // Detect or use specified language
+    const lang = (requestedLanguage || question.language || (source_code.includes("#include") ? "c" : "python")).toLowerCase();
+
+    // Python evaluation
+    if (lang === "python" || lang === "py") {
+        const batchResult = await execPythonBatch(source_code, testCases, { timeout: 5000 });
+        return { results: batchResult.results };
+    }
+
+    // C evaluation via WebAssembly sandbox
     const zip = await getZipData();
     const release = await wccSemaphore.acquire();
     const runner = new WccRunner({
@@ -545,7 +555,7 @@ const server = Bun.serve<WSData>({
                 // Automated Grading for SUBMIT
                 if (body.type === "SUBMIT" && body.data?.question_id && body.data?.answer) {
                     const session_id = body.session_id;
-                    const { results } = await evaluateCode(body.data.answer, body.data.question_id);
+                    const { results } = await evaluateCode(body.data.answer, body.data.question_id, body.data?.language);
 
                     if (results && results.length > 0) {
                         const allPassed = results.every((r: any) => r.pass);
@@ -841,10 +851,10 @@ const server = Bun.serve<WSData>({
                     }
                 }
 
-                const { source_code, question_id } = await parseJSON<any>(req);
+                const { source_code, question_id, language } = await parseJSON<any>(req);
                 if (!source_code || !question_id) throw new HttpError("Missing source_code or question_id", 400);
 
-                const { results, message } = await evaluateCode(source_code, question_id);
+                const { results, message } = await evaluateCode(source_code, question_id, language);
                 if (message) {
                     return Res(JSON.stringify({ result: { results: [], message } }));
                 }

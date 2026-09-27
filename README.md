@@ -14,8 +14,8 @@
 
 **debugging_cour** is an all-in-one assessment engine combining centralized computer lab terminal administration with an isolated in-process **WebAssembly/WASI C compiler runner**. It enables instructors and contest organizers to manage synchronized lab competitions without complex container orchestration (Docker/Kubernetes).
 
-The platform supports two simultaneous competition tracks:
-1. **C Code Debugging**: Contestants debug broken code snippets across multiple difficulty levels, evaluated against hidden test cases.
+The platform supports multi-language coding examinations and typing challenges:
+1. **Multi-Language Code Debugging (C & Python)**: Contestants debug broken code snippets in either standard C (C99) or Python (Python 3) across multiple difficulty levels, evaluated against hidden test cases with millisecond execution feedback.
 2. **Speed & Accuracy Typing**: Real-time typing challenges with live WPM, accuracy metrics, and attempt restrictions.
 
 ---
@@ -27,17 +27,22 @@ The platform supports two simultaneous competition tracks:
 - **Dynamic Candidate Assignment**: Assign registered participants to specific lab PCs remotely using 5-digit OTP verification.
 - **Synchronized Remote Start**: Launch or conclude exam sessions across all lab systems simultaneously with a single click.
 
-### 🛡️ Isolated WebAssembly C Sandbox (`wcc-lib`)
-- **Universal C Compatibility**: Full standard C runtime supporting standard formatted I/O (`scanf`, `sscanf`, `fscanf`, `printf`), math (`<math.h>`), strings (`<string.h>`), dynamic memory (`malloc`/`free`/`calloc`/`realloc`), sorting (`qsort`), and algorithms.
-- **Single-Compile Multi-Execution (`execBatch`)**: Compiles student source code once to WebAssembly and evaluates multiple test cases sequentially in milliseconds (<150ms per submission).
-- **Fast & Isolated**: Runs completely inside an in-memory WASI virtual filesystem with zero native GCC/Clang dependencies needed on host or client machines.
-- **Safety & Throttling**: Built-in execution timeouts, automatic missing header injection guards (`<stdio.h>`, `<stdlib.h>`), and semaphore concurrency queuing to prevent server resource starvation.
+### 🛡️ Dual-Language Isolated Sandboxes (C & Python)
+- **WebAssembly C Sandbox (`wcc-lib`)**:
+  - Full standard C runtime supporting standard formatted I/O (`scanf`, `sscanf`, `printf`), math (`<math.h>`), strings (`<string.h>`), dynamic memory (`malloc`/`free`), sorting (`qsort`), and algorithms.
+  - Compiles student source code once to WebAssembly and evaluates multiple test cases sequentially in milliseconds (<150ms per submission) with zero native GCC/Clang dependencies needed.
+- **Isolated Python Runner (`py-runner.ts`)**:
+  - Secure subprocess execution with temporary file isolation, standard I/O streaming, and strict process timeout enforcement to kill infinite loops.
+  - Normalized line endings and comprehensive error/traceback reporting.
+- **Safety & Throttling**: Execution timeouts (default 5000ms), concurrency throttling, and memory isolation to prevent server starvation.
 
-### 📝 Two Examination Tracks
-- **Debugging Challenges**:
+### 📝 Dual Examination Tracks
+- **Debugging & Fixing Challenges**:
+  - Multi-language support: Dynamic syntax highlighting and language badge switching (`C99` vs `Python 3`) in **CodeMirror 6**.
+  - Dynamic file tabs: Automatic switching between `solution.c` and `solution.py`.
+  - Admin management: Filter, create, edit, and organize questions and levels by programming language.
   - Multiple modes: Full code edit, buggy line identification, or code insertion.
-  - Interactive syntax highlighting and themes powered by **CodeMirror 6**.
-  - Server-side test case evaluation with granular feedback.
+  - Server-side test case evaluation with granular per-case pass/fail feedback.
 - **Typing Test**:
   - Live speed (WPM) and accuracy calculation.
   - Multi-attempt support with previous attempt shadow comparison.
@@ -102,10 +107,14 @@ The platform supports two simultaneous competition tracks:
 ```
 ├── main.ts               # Core backend HTTP server & route controllers
 ├── db.ts                 # SQLite schema, migrations, indexing & database methods
+├── py-runner.ts          # Python isolated execution engine & batch test evaluator
 ├── ws_server.ts          # Real-time WebSocket connection manager & terminal hub
 ├── bun-env.d.ts          # Bun TypeScript environment declarations
 ├── tsconfig.json         # Strict TypeScript configuration
 ├── run.bat               # Windows launcher script for both dev servers
+│
+├── scripts/
+│   └── seed_questions.ts # Seeder for C and Python curriculum exam questions & levels
 │
 ├── wcc-lib/              # WebAssembly C compiler execution engine
 │   ├── index.ts          # Public TypeScript API for WccRunner
@@ -118,7 +127,7 @@ The platform supports two simultaneous competition tracks:
     │   ├── lib/          # Shared components, API client, WS store, ExamGuard
     │   └── routes/
     │       ├── login/    # Candidate & terminal login page
-    │       ├── debug/    # C Code debugging workspace
+    │       ├── debug/    # C & Python code debugging workspace
     │       ├── typing/   # Typing speed competition interface
     │       ├── admin/    # Administrative dashboard & management suite
     │       └── thankyou/ # Post-exam submission screen
@@ -219,7 +228,7 @@ JWT_SECRET=super_secret_production_key_change_me
 
 ## 🧪 Verification & Health Checks
 
-Run automated type checking and linting to ensure code integrity:
+Run automated type checking, linting, and evaluation tests:
 
 ```bash
 # 1. Type check backend
@@ -228,6 +237,16 @@ bunx tsc --noEmit
 # 2. Check frontend templates & components
 cd frontend
 bun run check
+cd ..
+
+# 3. Test isolated Python runner engine
+bun run test_py_suite.ts
+
+# 4. Test end-to-end dual-language (C & Python) API evaluation
+bun run test_dual_eval_api.ts
+
+# 5. (Optional) Re-seed C and Python exam curriculum questions
+bun run scripts/seed_questions.ts
 ```
 
 ---

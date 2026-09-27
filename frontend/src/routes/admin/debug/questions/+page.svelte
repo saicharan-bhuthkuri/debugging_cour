@@ -34,6 +34,7 @@
       code_snippet: "",
       difficulty: "easy",
       question_type: "full_edit",
+      language: "c",
       answer_meta: null as any,
       test_cases: [] as { input: string, output: string }[]
   });
@@ -48,12 +49,15 @@
   let missingLinesInput = $state("");
   let editMissingLinesInput = $state("");
 
+  let languageFilter = $state("all");
+
   // Derived
   let filteredQuestions = $derived(questions.filter(q => {
     const matchesSearch = q.title.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDifficulty = difficultyFilter === "all" || q.difficulty === difficultyFilter;
     const matchesType = typeFilter === "all" || q.question_type === typeFilter;
-    return matchesSearch && matchesDifficulty && matchesType;
+    const matchesLanguage = languageFilter === "all" || (q.language || "c") === languageFilter;
+    return matchesSearch && matchesDifficulty && matchesType && matchesLanguage;
   }));
 
   function getCodeLines(code: string) {
@@ -107,7 +111,7 @@
           };
           await api("/debug/question", "POST", payload, token || "");
           isAddModalOpen = false;
-          newQuestion = { title: "", description: "", code_snippet: "", difficulty: "easy", question_type: "full_edit", answer_meta: null, test_cases: [] };
+          newQuestion = { title: "", description: "", code_snippet: "", difficulty: "easy", question_type: "full_edit", language: "c", answer_meta: null, test_cases: [] };
           buggyLinesInput = "";
           missingLinesInput = "";
           fetchQuestions();
@@ -119,7 +123,7 @@
   }
 
   function openEditModal(question: any) {
-      editingQuestion = { ...question };
+      editingQuestion = { ...question, language: question.language || 'c' };
       // Populate line inputs from answer_meta
       if (question.answer_meta?.buggy_lines) {
           editBuggyLinesInput = question.answer_meta.buggy_lines.join(', ');
@@ -197,6 +201,18 @@
   <span class="text-xs px-2 py-1 rounded-full border uppercase tracking-wider font-mono {colors[row.difficulty as keyof typeof colors] || 'bg-gray-100'}">
     {row.difficulty}
   </span>
+{/snippet}
+
+{#snippet languageCell(row: any)}
+  {#if row.language === 'python'}
+    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+      Python 3
+    </span>
+  {:else}
+    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+      C99
+    </span>
+  {/if}
 {/snippet}
 
 {#snippet metaCell(row: any)}
@@ -349,6 +365,13 @@
           {/each}
        </select>
     </div>
+    <div class="w-full md:w-48">
+       <select bind:value={languageFilter} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+          <option value="all">All Languages</option>
+          <option value="c">C (C99)</option>
+          <option value="python">Python 3</option>
+       </select>
+    </div>
   </div>
 
   {#if loading}
@@ -359,6 +382,7 @@
         data={filteredQuestions} 
         columns={[
           { key: 'title', label: 'Title' },
+          { key: 'language', label: 'Language', render: languageCell },
           { key: 'question_type', label: 'Type', render: typeCell },
           { key: 'difficulty', label: 'Difficulty', render: difficultyCell },
           { key: 'answer_meta', label: 'Config', render: metaCell },
@@ -381,6 +405,15 @@
                     <option value="easy">Easy</option>
                     <option value="medium">Medium</option>
                     <option value="hard">Hard</option>
+                </select>
+            </label>
+        </div>
+        <div class="w-1/2">
+            <label class="flex flex-col gap-1.5 w-full">
+                <span class="text-sm font-medium text-gray-700">Language</span>
+                <select bind:value={newQuestion.language} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+                    <option value="c">C (C99)</option>
+                    <option value="python">Python 3</option>
                 </select>
             </label>
         </div>
@@ -466,6 +499,15 @@
                       <option value="easy">Easy</option>
                       <option value="medium">Medium</option>
                       <option value="hard">Hard</option>
+                  </select>
+              </label>
+          </div>
+          <div class="w-1/2">
+              <label class="flex flex-col gap-1.5 w-full">
+                  <span class="text-sm font-medium text-gray-700">Language</span>
+                  <select bind:value={editingQuestion.language} class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900">
+                      <option value="c">C (C99)</option>
+                      <option value="python">Python 3</option>
                   </select>
               </label>
           </div>

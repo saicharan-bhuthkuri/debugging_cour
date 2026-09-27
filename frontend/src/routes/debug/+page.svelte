@@ -243,7 +243,8 @@
                 const token = localStorage.getItem("login_token") || "";
                 const res = await api("/debug/run", "POST", {
                     source_code: questionStates[currentQ.id].answer,
-                    question_id: currentQ.id
+                    question_id: currentQ.id,
+                    language: currentLanguage
                 }, token);
                 
                 if (res && res.results) {
@@ -300,7 +301,8 @@
                 question_title: q.title || '',
                 original_code: q.code_snippet || '',
                 answer: questionStates[q.id].answer,
-                question_type: q.question_type || 'full_edit'
+                question_type: q.question_type || 'full_edit',
+                language: (q as any).language || 'c'
             };
             // Include mode-specific data
             if (q.question_type === 'find_buggy_line') {
@@ -398,6 +400,7 @@
     let currentState = $derived(currentQ ? questionStates[currentQ.id] : null);
     let isLastQuestion = $derived(currentIndex === questions.length - 1);
     let currentQuestionType = $derived((currentQ?.question_type || 'full_edit') as 'full_edit' | 'find_buggy_line' | 'add_lines' | 'missing_lines');
+    let currentLanguage = $derived(((currentQ as any)?.language || 'c') as 'c' | 'python');
 
     function formatTime(sec: number) {
         const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -550,12 +553,24 @@
         <section class="panel-right">
             <div class="editor-tabs">
                 <div class="tab">
-                    <svg viewBox="0 0 32 32">
-                        <path d="M0 0h32v32H0z" fill="none" />
-                        <path d="M16 2L3 9.5 5 29l11 3 11-3 2-19.5L16 2z m0 26.5l-8-2.2-1.5-14.7L16 4.5l9.5 7.1-1.5 14.7-8 2.2z" fill="#5c6bc0" />
-                        <path d="M16 25c-5 0-9-4-9-9s4-9 9-9 9 4 9 9h-3c0-3.3-2.7-6-6-6s-6 2.7-6 6 2.7 6 6 6v3z" fill="#fff" />
-                    </svg>
-                    solution.c
+                    {#if currentLanguage === 'python'}
+                        <svg class="w-4 h-4 mr-1.5" viewBox="0 0 24 24" fill="none">
+                            <path d="M11.9 1.5c-3.1 0-5.4.6-5.4 2.7v2.3h5.6v.8H4.3c-2.4 0-4.3 1.9-4.3 4.3 0 2.2 1.6 3.9 3.7 4.2v-2.3c0-2.4 2-4.3 4.4-4.3h5.5v-.8H8v-2.3c0-1.8 1.8-3.1 3.9-3.1h4.6c1.3 0 2.3.9 2.3 2.1V7h.8c2.1 0 3.7 1.7 3.7 3.8v3.5c0 2.1-1.7 3.8-3.8 3.8h-1.6v-2.3c0-2.4-2-4.3-4.4-4.3H8.1v.8h5.6c1.7 0 3.1 1.4 3.1 3.1v3.9c0 1.9-1.9 3.1-3.9 3.1h-4.6c-1.3 0-2.3-.9-2.3-2.1V21h-.8C3.1 21 1.5 19.3 1.5 17.2V13.7" fill="#3776AB"/>
+                        </svg>
+                        solution.py
+                    {:else}
+                        <svg viewBox="0 0 32 32">
+                            <path d="M0 0h32v32H0z" fill="none" />
+                            <path d="M16 2L3 9.5 5 29l11 3 11-3 2-19.5L16 2z m0 26.5l-8-2.2-1.5-14.7L16 4.5l9.5 7.1-1.5 14.7-8 2.2z" fill="#5c6bc0" />
+                            <path d="M16 25c-5 0-9-4-9-9s4-9 9-9 9 4 9 9h-3c0-3.3-2.7-6-6-6s-6 2.7-6 6 2.7 6 6 6v3z" fill="#fff" />
+                        </svg>
+                        solution.c
+                    {/if}
+                </div>
+                <div class="ml-auto flex items-center pr-3">
+                    <span class="text-xs uppercase font-bold tracking-wider px-2 py-0.5 rounded {currentLanguage === 'python' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}">
+                        {currentLanguage === 'python' ? 'Python 3' : 'C99'}
+                    </span>
                 </div>
             </div>
 
@@ -564,7 +579,7 @@
                     <CodeEditor
                         code={questionStates[currentQ.id].answer}
                         mode={currentQuestionType}
-                        language="c"
+                        language={currentLanguage}
                         answerMeta={currentQ.answer_meta}
                         onchange={handleCodeChange}
                         onmarkedlines={handleMarkedLines}

@@ -41,6 +41,7 @@ export async function initDB() {
             question_type TEXT DEFAULT 'full_edit',
             answer_meta TEXT,
             test_cases TEXT,
+            language TEXT DEFAULT 'c',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`;
 
@@ -48,6 +49,7 @@ export async function initDB() {
         try { await db`ALTER TABLE debug_questions ADD COLUMN question_type TEXT DEFAULT 'full_edit'`; } catch { }
         try { await db`ALTER TABLE debug_questions ADD COLUMN answer_meta TEXT`; } catch { }
         try { await db`ALTER TABLE debug_questions ADD COLUMN test_cases TEXT`; } catch { }
+        try { await db`ALTER TABLE debug_questions ADD COLUMN language TEXT DEFAULT 'c'`; } catch { }
 
         await db`CREATE TABLE IF NOT EXISTS debug_levels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -406,13 +408,13 @@ export async function getStudentQuestions(levelId?: number | null) {
         if (levelId) {
             const { level } = await getDebugLevelById(levelId);
             if (level && Array.isArray(level.question_ids) && level.question_ids.length > 0) {
-                const allQ = await db`SELECT id, title, description, code_snippet, difficulty, question_type FROM debug_questions`;
+                const allQ = await db`SELECT id, title, description, code_snippet, difficulty, question_type, language FROM debug_questions`;
                 const idSet = new Set(level.question_ids);
                 const questions = allQ.filter((q: any) => idSet.has(q.id));
                 return { questions };
             }
         }
-        const questions = await db`SELECT id, title, description, code_snippet, difficulty, question_type FROM debug_questions`;
+        const questions = await db`SELECT id, title, description, code_snippet, difficulty, question_type, language FROM debug_questions`;
         return { questions };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
@@ -434,8 +436,9 @@ export async function createDebugQuestion(data: any) {
         const questionType = data.question_type || 'full_edit';
         const answerMeta = data.answer_meta ? JSON.stringify(data.answer_meta) : null;
         const testCases = data.test_cases ? JSON.stringify(data.test_cases) : null;
-        await db`INSERT INTO debug_questions (title, description, code_snippet, difficulty, question_type, answer_meta, test_cases) 
-            VALUES (${data.title}, ${data.description}, ${data.code_snippet}, ${data.difficulty}, ${questionType}, ${answerMeta}, ${testCases})`;
+        const language = data.language || 'c';
+        await db`INSERT INTO debug_questions (title, description, code_snippet, difficulty, question_type, answer_meta, test_cases, language) 
+            VALUES (${data.title}, ${data.description}, ${data.code_snippet}, ${data.difficulty}, ${questionType}, ${answerMeta}, ${testCases}, ${language})`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
@@ -445,11 +448,12 @@ export async function updateDebugQuestion(id: number, data: any) {
         const questionType = data.question_type || 'full_edit';
         const answerMeta = data.answer_meta ? JSON.stringify(data.answer_meta) : null;
         const testCases = data.test_cases ? JSON.stringify(data.test_cases) : null;
+        const language = data.language || 'c';
         await db`UPDATE debug_questions SET 
             title = ${data.title}, description = ${data.description}, 
             code_snippet = ${data.code_snippet}, difficulty = ${data.difficulty},
             question_type = ${questionType}, answer_meta = ${answerMeta},
-            test_cases = ${testCases}
+            test_cases = ${testCases}, language = ${language}
             WHERE id = ${id}`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
