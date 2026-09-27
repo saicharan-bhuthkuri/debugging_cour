@@ -210,8 +210,10 @@
       <Input label="Level Name" bind:value={newLevel.name} placeholder="e.g. Level 1" required />
       <Input label="Order" type="number" bind:value={newLevel.order} required />
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Duration (seconds)</label>
-        <input type="number" bind:value={newLevel.duration} min="60" step="60" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Duration (seconds)
+          <input type="number" bind:value={newLevel.duration} min="60" step="60" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-normal focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </label>
         <p class="text-xs text-gray-500 mt-1">{Math.floor(newLevel.duration / 60)} min {newLevel.duration % 60}s</p>
       </div>
       
@@ -254,8 +256,10 @@
         <Input label="Level Name" bind:value={editingLevel.name} required />
         <Input label="Order" type="number" bind:value={editingLevel.order} required />
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Duration (seconds)</label>
-          <input type="number" bind:value={editingLevel.duration} min="60" step="60" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            Duration (seconds)
+            <input type="number" bind:value={editingLevel.duration} min="60" step="60" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-normal focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </label>
           <p class="text-xs text-gray-500 mt-1">{Math.floor((editingLevel.duration || 900) / 60)} min {(editingLevel.duration || 900) % 60}s</p>
         </div>
         

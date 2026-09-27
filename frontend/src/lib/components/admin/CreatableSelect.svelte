@@ -81,17 +81,19 @@
   function handleFocus() {
       isOpen = true;
   }
+  let inputId = 'cs-' + Math.random().toString(36).slice(2, 9);
 </script>
 
 <div class="w-full relative">
   {#if label}
-    <label class="block text-sm font-medium text-gray-700 mb-1">
+    <label for={inputId} class="block text-sm font-medium text-gray-700 mb-1">
       {label} {#if required}<span class="text-red-500">*</span>{/if}
     </label>
   {/if}
   
   <div class="relative">
     <input 
+      id={inputId}
       bind:this={inputRef}
       type="text" 
       bind:value={inputValue}

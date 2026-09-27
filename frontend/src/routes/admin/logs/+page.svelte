@@ -328,10 +328,19 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => e.key === 'Escape' && showSessionModal && (showSessionModal = false)} />
+
 <!-- Session Detail Modal -->
 {#if showSessionModal}
-  <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick={() => showSessionModal = false} onkeydown={(e) => e.key === 'Escape' && (showSessionModal = false)} role="dialog" tabindex="-1" aria-label="Session detail">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto" onclick={(e) => e.stopPropagation()} role="document">
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label="Session detail">
+    <button 
+      type="button"
+      class="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-default w-full h-full border-0" 
+      onclick={() => showSessionModal = false}
+      aria-label="Close session detail"
+      tabindex="-1"
+    ></button>
+    <div class="relative bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto z-10" role="document">
       {#if loadingSession}
         <div class="p-12 text-center text-gray-500 animate-pulse">Loading session...</div>
       {:else if sessionDetail}

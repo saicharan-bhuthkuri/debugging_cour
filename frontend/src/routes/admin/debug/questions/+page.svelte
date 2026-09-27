@@ -267,7 +267,7 @@
 
 {#snippet questionTypeSelector(value: string, onchange: (v: string) => void)}
   <div class="w-full">
-    <label class="block text-sm font-medium text-gray-700 mb-2">Question Type</label>
+    <span class="block text-sm font-medium text-gray-700 mb-2">Question Type</span>
     <div class="grid grid-cols-2 gap-2">
       {#each QUESTION_TYPES as type}
         {@const isSelected = value === type.value}
@@ -288,7 +288,7 @@
 {#snippet testCasesEditor(testCases: any[], onUpdate: (tc: any[]) => void)}
   <div class="space-y-3">
     <div class="flex items-center justify-between">
-      <label class="text-sm font-medium text-gray-700">Test Cases (for execution)</label>
+      <span class="text-sm font-medium text-gray-700">Test Cases (for execution)</span>
       <button 
         type="button" 
         onclick={() => onUpdate([...testCases, { input: "", output: "" }])}
@@ -307,27 +307,33 @@
       {#each testCases as tc, i}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 bg-gray-50 rounded-lg border border-gray-200 relative group">
           <div>
-            <label class="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Input</label>
-            <textarea 
-              bind:value={tc.input} 
-              rows="1" 
-              class="w-full text-xs px-2 py-1.5 bg-white border border-gray-300 rounded font-mono focus:outline-none focus:border-gray-900"
-              placeholder="No input"
-            ></textarea>
+            <label class="text-[10px] uppercase font-bold text-gray-400 mb-1 block">
+              Input
+              <textarea 
+                bind:value={tc.input} 
+                rows="1" 
+                class="w-full text-xs px-2 py-1.5 bg-white border border-gray-300 rounded font-mono focus:outline-none focus:border-gray-900 mt-1"
+                placeholder="No input"
+              ></textarea>
+            </label>
           </div>
           <div>
-            <label class="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Expected Output</label>
-            <textarea 
-              bind:value={tc.output} 
-              rows="1" 
-              class="w-full text-xs px-2 py-1.5 bg-white border border-gray-300 rounded font-mono focus:outline-none focus:border-gray-900"
-              placeholder="Expected output"
-            ></textarea>
+            <label class="text-[10px] uppercase font-bold text-gray-400 mb-1 block">
+              Expected Output
+              <textarea 
+                bind:value={tc.output} 
+                rows="1" 
+                class="w-full text-xs px-2 py-1.5 bg-white border border-gray-300 rounded font-mono focus:outline-none focus:border-gray-900 mt-1"
+                placeholder="Expected output"
+              ></textarea>
+            </label>
           </div>
           <button 
             type="button"
             onclick={() => onUpdate(testCases.filter((_, idx) => idx !== i))}
             class="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+            aria-label="Delete test case"
+            title="Delete test case"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
           </button>

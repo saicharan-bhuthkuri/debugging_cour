@@ -839,10 +839,19 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => e.key === 'Escape' && inspectingSubmission && (inspectingSubmission = null)} />
+
 <!-- Answer Inspector Modal (Debug only) -->
 {#if inspectingSubmission}
-  <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick={() => inspectingSubmission = null} onkeydown={(e) => e.key === 'Escape' && (inspectingSubmission = null)} role="dialog" tabindex="-1" aria-label="Answer inspector">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onclick={(e) => e.stopPropagation()} role="document">
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label="Answer inspector">
+    <button 
+      type="button"
+      class="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-default w-full h-full border-0" 
+      onclick={() => inspectingSubmission = null}
+      aria-label="Close answer inspector backdrop"
+      tabindex="-1"
+    ></button>
+    <div class="relative bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto z-10" role="document">
       <div class="p-6 border-b border-gray-200 flex items-center justify-between">
         <div>
           <h2 class="text-xl font-bold text-gray-900">
