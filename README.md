@@ -1,4 +1,4 @@
-# ⚡ Debugging Course & Lab Exam Platform
+# ⚡ Antigravity Hackathon 2026 — Debugging Championship & Lab Exam Platform
 
 > A modern, real-time automated coding examination and competition platform designed for computer labs, university hackathons, and technical assessments.
 
@@ -13,12 +13,15 @@
 
 ## 📖 Overview
 
-**debugging_cour** is an all-in-one assessment engine combining centralized computer lab terminal administration with an isolated in-process **WebAssembly/WASI C compiler runner** and an **isolated Python execution engine**. It enables instructors and contest organizers to manage synchronized lab competitions without complex container orchestration (Docker/Kubernetes).
+**debugging_cour** is an all-in-one assessment and competition engine combining centralized computer lab terminal administration with an isolated in-process **WebAssembly/WASI C compiler runner** and an **isolated Python execution engine**. It enables instructors and contest organizers to manage synchronized lab competitions without complex container orchestration (Docker/Kubernetes).
 
-The platform supports multi-language coding examinations and typing challenges:
-1. **Multi-Language Code Debugging (C & Python)**: Contestants debug broken code snippets in either standard C (C99) or Python (Python 3) across multiple difficulty levels, evaluated against hidden test cases with millisecond execution feedback.
-2. **Pre-Built Competition Sets (4 C Sets & 4 Python Sets)**: Includes 8 comprehensive contest sets (Sets A, B, C, D for both C and Python) with balanced Easy/Medium/Hard distributions, avoiding duplicate questions across sets.
-3. **Speed & Accuracy Typing**: Real-time typing challenges with live WPM, accuracy metrics, and attempt restrictions.
+The platform supports multi-language coding examinations, typing speed challenges, and live arena spectator displays:
+1. **Multi-Language Code Debugging (C & Python)**: Contestants debug broken code snippets in standard C (C99) or Python (Python 3) across multiple difficulty levels, evaluated against hidden test cases with millisecond execution feedback.
+2. **Standard 15-Minute Exam Duration**: All debugging challenges are tuned for high-intensity, synchronized 15-minute (900s) contest sessions with automated server-side timer enforcement.
+3. **Pre-Built Competition Sets (4 C Sets & 4 Python Sets)**: Includes 8 comprehensive contest sets (Sets A, B, C, D for both C and Python) with balanced Easy/Medium/Hard distributions, avoiding duplicate questions across sets.
+4. **Candidate Access Terminal & Instant Remote Start**: Cybernetic workstation login terminal displaying assigned candidate credentials, college, branch, and challenge details, automatically entering the code editor when admin triggers exam mode.
+5. **Real-Time Live Arena Leaderboard & Spectator Mode (`/leaderboard`)**: Real-time contestant ranking with attendee deduplication, ICPC problem status matrix, global first-to-solve badges, projector auto-scrolling, and scoreboard freeze.
+6. **Speed & Accuracy Typing**: Real-time typing challenges with live WPM, accuracy metrics, and attempt restrictions.
 
 ---
 
@@ -27,7 +30,8 @@ The platform supports multi-language coding examinations and typing challenges:
 ### 🖥️ Real-Time Lab & Terminal Control
 - **WebSocket Synchronization**: Workstation terminals connect with unique PC codes and stream statuses (`online`, `booked`, `exam`, `offline`).
 - **Dynamic Candidate Assignment**: Assign registered participants to specific lab PCs remotely using 5-digit OTP verification.
-- **Synchronized Remote Start**: Launch or conclude exam sessions across all lab systems simultaneously with a single click.
+- **Candidate Profile Access Card**: When a workstation terminal is booked, it displays an assigned cybernetic candidate profile card with avatar, candidate name, college, branch, year, phone/ID, assigned challenge, and duration (`15:00`).
+- **Synchronized Remote Auto-Start**: Launch exam sessions across all lab systems remotely from admin. When a workstation enters `exam` mode, the client terminal automatically launches into the coding IDE via WebSocket broadcast and fallback polling.
 
 ### 🛡️ Dual-Language Isolated Sandboxes (C & Python)
 - **WebAssembly C Sandbox (`wcc-lib`)**:
@@ -37,6 +41,10 @@ The platform supports multi-language coding examinations and typing challenges:
   - Secure subprocess execution with temporary file isolation, standard I/O streaming, and strict process timeout enforcement to kill infinite loops.
   - Normalized line endings and comprehensive error/traceback reporting.
 - **Safety & Throttling**: Execution timeouts (default 5000ms), concurrency throttling, and memory isolation to prevent server starvation.
+
+### ⏱️ Standardized 15-Minute Challenge Time Limit
+- All competition levels and challenges default to **15 minutes (900 seconds)**.
+- Integrated countdown clock on student coding terminals with automated server-side timeout auto-submission upon expiry.
 
 ### 📚 4 C Question Sets & 4 Python Question Sets (Pre-Seeded)
 The platform includes 24 competition-grade debugging questions organized into 8 sets:
@@ -50,6 +58,18 @@ The platform includes 24 competition-grade debugging questions organized into 8 
   - **Set B**: Flatten Nested List, Common Elements, FizzBuzz Generator
   - **Set C**: Caesar Cipher, Binary Search, Character Frequency
   - **Set D**: Matrix Diagonal Sum, Longest Word in Sentence, Run Length Encoding
+
+### 🏆 Real-Time Arena Leaderboard & Spectator Mode (`/leaderboard`)
+- **Attendee-Wide Aggregation & Deduplication**:
+  - Displays all participants who attend the competition with clear, official rankings.
+  - Automatically deduplicates multiple sessions from the same candidate, presenting their single best score and lowest penalty time.
+  - Includes registered and active contestants (even with 0 score) with their assigned PC workstation codes, branches, and colleges.
+- **Top 3 Winner Podium**: Dedicated Gold (🥇), Silver (🥈), and Bronze (🥉) podium cards highlighting the top 3 distinct contenders with score, solves, and penalty breakdown.
+- **ICPC-Style Problem Matrix**: Real-time solve status per problem (`✔ +attempts` in green with solve minutes, `✖ -attempts` in red for unsuccessful attempts), solve timestamps, and golden lightning badges (`⚡`) for global first solves.
+- **Dual Competition Tracks**: Instant toggle between **Coding Arena** (points, solves & penalty) and **Typing Speed** (WPM & accuracy).
+- **Projector & Spectator Controls**: Native fullscreen projector mode, hands-free auto-scrolling with boundary pauses, and Web Audio API synthesizer solve chimes.
+- **Scoreboard Freeze Control**: Proctors can freeze the public scoreboard during the final minutes to maintain awards suspense while evaluations continue server-side.
+- **Live Search & Department Filters**: Real-time filtering by College, Branch, or candidate name/PC workstation code.
 
 ### 📝 Dual Examination Tracks
 - **Debugging & Fixing Challenges**:
@@ -287,6 +307,12 @@ bun run test_dual_eval_api.ts
 
 # 5. Seed 4 C Sets & 4 Python Sets
 bun run scripts/seed_4_sets.ts
+
+# 6. Test Live Leaderboard & Contest Settings API
+bun run test_leaderboard_api.ts
+
+# 7. Test End-to-End Live Leaderboard Deduplication & ICPC Problem Matrix
+bun run test_e2e_leaderboard.ts
 ```
 
 ---
