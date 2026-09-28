@@ -2,7 +2,7 @@ import { type ServerWebSocket } from "bun";
 import * as db from "./db";
 
 export interface WSData {
-	role: "admin" | "superadmin" | "system";
+	role: "admin" | "superadmin" | "system" | "spectator";
 	id: number;
 	name: string;
 }
@@ -10,6 +10,7 @@ export interface WSData {
 export class WebSocketManager {
 	private connectedSystems = new Map<number, ServerWebSocket<WSData>>();
 	private connectedAdmins = new Set<ServerWebSocket<WSData>>();
+	private connectedSpectators = new Set<ServerWebSocket<WSData>>();
 	public connectedClients = new Set<ServerWebSocket<WSData>>(); // Track all?
 
 	constructor() {
@@ -22,7 +23,8 @@ export class WebSocketManager {
 	public getStatus() {
 		return {
 			admins: this.connectedAdmins.size,
-			systems: this.connectedSystems.size
+			systems: this.connectedSystems.size,
+			spectators: this.connectedSpectators.size
 		};
 	}
 
@@ -48,13 +50,27 @@ export class WebSocketManager {
 		return false;
 	}
 
-	// Broadcast to everyone (Admins + Systems)
+	// Broadcast to everyone (Admins + Systems + Spectators)
 	public broadcastAll(msg: any) {
 		const data = JSON.stringify(msg);
 		for (const ws of this.connectedAdmins) {
 			if (ws.readyState === 1) ws.send(data);
 		}
 		for (const ws of this.connectedSystems.values()) {
+			if (ws.readyState === 1) ws.send(data);
+		}
+		for (const ws of this.connectedSpectators) {
+			if (ws.readyState === 1) ws.send(data);
+		}
+	}
+
+	// Broadcast to Leaderboard Viewers (Admins + Spectators)
+	public broadcastLeaderboard(msg: any = { type: "leaderboard_update" }) {
+		const data = JSON.stringify(msg);
+		for (const ws of this.connectedAdmins) {
+			if (ws.readyState === 1) ws.send(data);
+		}
+		for (const ws of this.connectedSpectators) {
 			if (ws.readyState === 1) ws.send(data);
 		}
 	}
@@ -108,6 +124,9 @@ export class WebSocketManager {
 
 			// Notify other admins (and potentially systems if needed?)
 			this.broadcastAdmins({ type: "admin_count", count: this.connectedAdmins.size });
+		} else if (ws.data.role === "spectator") {
+			this.connectedSpectators.add(ws);
+			ws.send(JSON.stringify({ type: "connected", role: "spectator" }));
 		}
 	}
 
@@ -145,6 +164,8 @@ export class WebSocketManager {
 		} else if (ws.data.role === "admin" || ws.data.role === "superadmin") {
 			this.connectedAdmins.delete(ws);
 			this.broadcastAdmins({ type: "admin_count", count: this.connectedAdmins.size });
+		} else if (ws.data.role === "spectator") {
+			this.connectedSpectators.delete(ws);
 		}
 	}
 }

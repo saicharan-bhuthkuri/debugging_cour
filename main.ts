@@ -315,18 +315,15 @@ const server = Bun.serve<WSData>({
                     // If OTP is provided, verify it (Exam Start / Validation)
                     if (body.otp) {
                         if (system.login_otp !== body.otp) throw new HttpError("Invalid OTP", 401);
-                    } else {
-                        // Code-only login: Just claiming the system (Online Mode)
-                        if (system.status !== 'offline') {
-                            throw new HttpError("Duplicate System ID", 409);
-                        }
                     }
 
                     const token = await createToken({ id: system.id, name: system.code, role: "system" });
 
-                    // Lock system immediately to prevent race conditions
-                    await db.updateSystem(system.id, { status: 'online' });
-                    await notifySystemUpdate(system.id);
+                    // Only set to online if currently offline (preserve booked/exam states)
+                    if (system.status === 'offline') {
+                        await db.updateSystem(system.id, { status: 'online' });
+                        await notifySystemUpdate(system.id);
+                    }
 
                     return Res(JSON.stringify({ result: token }), { status: 200 });
                 }
@@ -400,47 +397,71 @@ const server = Bun.serve<WSData>({
             POST: handler(async req => {
                 const auth = req.headers.get("Authorization");
                 const { payload } = await verifyJWT(auth ?? "");
-                if (!payload || payload.role !== "system") throw new HttpError("Unauthorized", 401);
+                if (!payload) throw new HttpError("Unauthorized", 401);
 
-                const { system } = await db.getSystemByCode((payload as any).name);
+                // Find system by code (if payload is system) or body/query (if admin)
+                let systemCode = (payload as any).role === "system" ? (payload as any).name : "";
+                if (!systemCode) {
+                    try {
+                        const body = await parseJSON<any>(req);
+                        if (body?.code) systemCode = body.code;
+                    } catch {}
+                }
+
+                if (!systemCode) throw new HttpError("System code required", 400);
+
+                const { system } = await db.getSystemByCode(systemCode);
                 if (!system) throw new HttpError("System invalid", 404);
 
                 // Fetch level duration
                 let levelDuration = 900; // default 15 min
                 if (system.assigned_level_id) {
-                    const { level } = await db.getDebugLevelById(system.assigned_level_id);
-                    if (level && level.duration) levelDuration = level.duration;
+                    if (system.exam_type === 'typing') {
+                        const { level } = await db.getTypingLevelById(system.assigned_level_id);
+                        if (level && level.time_limit) levelDuration = level.time_limit;
+                    } else {
+                        const { level } = await db.getDebugLevelById(system.assigned_level_id);
+                        if (level && level.duration) levelDuration = level.duration;
+                    }
                 }
 
-                // Create Exam Session
-                const { id: sessionId, error } = await db.createExamSession({
-                    user_id: system.assigned_to,
-                    system_id: system.id,
-                    exam_mode: system.exam_type
-                });
+                // Check for existing active ongoing session
+                const { session: activeSession } = await db.getActiveExamSession(system.id);
+                let sessionId = activeSession?.id;
 
-                if (error) throw new HttpError("Failed to create session", 500);
+                if (!sessionId && system.assigned_to) {
+                    // Create Exam Session
+                    const { id: newSessionId, error } = await db.createExamSession({
+                        user_id: system.assigned_to,
+                        system_id: system.id,
+                        exam_mode: system.exam_type || 'debug'
+                    });
 
-                // Log Start Event
-                await db.createSystemLog({
-                    exam_session_id: sessionId,
-                    user_id: system.assigned_to,
-                    system_code: system.code,
-                    log_type: "EXAM_START",
-                    data: {
-                        timestamp: new Date().toISOString(),
-                        exam_mode: system.exam_type,
-                        msg: "Exam Started"
-                    }
-                });
+                    if (error) throw new HttpError("Failed to create session", 500);
+                    sessionId = newSessionId;
+
+                    // Log Start Event
+                    await db.createSystemLog({
+                        exam_session_id: sessionId!,
+                        user_id: system.assigned_to,
+                        system_code: system.code,
+                        log_type: "EXAM_START",
+                        data: {
+                            timestamp: new Date().toISOString(),
+                            exam_mode: system.exam_type,
+                            msg: "Exam Started"
+                        }
+                    });
+                }
 
                 // Update to EXAM mode
                 await db.updateSystem(system.id, { status: 'exam' });
 
                 // Broadcast change
                 await notifySystemUpdate(system.id);
+                notifyLeaderboardUpdate();
 
-                return Res(JSON.stringify({ result: { message: "Started", sessionId, duration: levelDuration } }), { status: 200 });
+                return Res(JSON.stringify({ result: { message: "Started", sessionId: sessionId || 1, duration: levelDuration } }), { status: 200 });
             })
         },
 
@@ -497,6 +518,7 @@ const server = Bun.serve<WSData>({
 
                 // Broadcast change
                 await notifySystemUpdate(system.id);
+                notifyLeaderboardUpdate();
 
                 return Res(JSON.stringify({ result: "Finished" }), { status: 200 });
             })
@@ -567,6 +589,9 @@ const server = Bun.serve<WSData>({
                             await db.gradeSubmission(session_id, body.data.question_id, false);
                         }
                     }
+                    notifyLeaderboardUpdate();
+                } else if (body.type === "TYPING_RESULT") {
+                    notifyLeaderboardUpdate();
                 }
 
                 return Res(JSON.stringify({ result: "Logged" }), { status: 200 });
@@ -608,6 +633,22 @@ const server = Bun.serve<WSData>({
                         if (level) levelInfo = { id: level.id, name: level.name, duration: level.duration || 900 };
                     }
                 }
+                if (!levelInfo && (system as any).level_name) {
+                    levelInfo = {
+                        id: system.assigned_level_id,
+                        name: (system as any).level_name,
+                        duration: (system as any).level_duration || 900
+                    };
+                }
+
+                const assignedUserDetails = (system as any).assigned_to_name ? {
+                    name: (system as any).assigned_to_name,
+                    branch: (system as any).assigned_user_branch || "",
+                    year: (system as any).assigned_user_year || null,
+                    college: (system as any).assigned_user_college || "",
+                    phone: (system as any).assigned_user_phone || "",
+                    role: (system as any).assigned_user_role || "member"
+                } : null;
 
                 return Res(JSON.stringify({
                     result: {
@@ -615,6 +656,12 @@ const server = Bun.serve<WSData>({
                         status: system.status,
                         exam_type: system.exam_type,
                         assigned_to_name: (system as any).assigned_to_name,
+                        assigned_user_branch: (system as any).assigned_user_branch,
+                        assigned_user_year: (system as any).assigned_user_year,
+                        assigned_user_college: (system as any).assigned_user_college,
+                        assigned_user_phone: (system as any).assigned_user_phone,
+                        assigned_user_role: (system as any).assigned_user_role,
+                        assigned_user: assignedUserDetails,
                         assigned_level_id: system.assigned_level_id,
                         level: levelInfo
                     }
@@ -710,6 +757,34 @@ const server = Bun.serve<WSData>({
                     // If not connected, it stays offline
 
                     return Res(JSON.stringify({ result: "Updated" }));
+                }
+
+                if (data.status === 'exam' && currentSystem) {
+                    // Check if an ongoing session already exists
+                    const { session: activeSession } = await db.getActiveExamSession(id);
+                    let sessionId = activeSession?.id;
+
+                    if (!sessionId && currentSystem.assigned_to) {
+                        const { id: newSessionId } = await db.createExamSession({
+                            user_id: currentSystem.assigned_to,
+                            system_id: currentSystem.id,
+                            exam_mode: currentSystem.exam_type || 'debug'
+                        });
+                        sessionId = newSessionId;
+
+                        await db.createSystemLog({
+                            exam_session_id: sessionId!,
+                            user_id: currentSystem.assigned_to,
+                            system_code: currentSystem.code,
+                            log_type: "EXAM_START",
+                            data: {
+                                timestamp: new Date().toISOString(),
+                                exam_mode: currentSystem.exam_type || 'debug',
+                                msg: "Exam Started by Admin"
+                            }
+                        });
+                    }
+                    notifyLeaderboardUpdate();
                 }
 
                 const { error } = await db.updateSystem(id, data);
@@ -1115,6 +1190,7 @@ const server = Bun.serve<WSData>({
 
                 const { success, error } = await db.gradeSubmission(session_id, question_id, is_correct);
                 if (error) throw new HttpError(error, 500);
+                notifyLeaderboardUpdate();
                 return Res(JSON.stringify({ result: { success } }));
             })
         },
@@ -1174,6 +1250,56 @@ const server = Bun.serve<WSData>({
             })
         },
 
+        // --- LEADERBOARD ---
+        "/leaderboard/data": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                let allowFrozen = false;
+                const auth = req.headers.get("Authorization");
+                if (auth) {
+                    const { payload } = await verifyJWT(auth);
+                    if (payload && (payload.role === "admin" || payload.role === "superadmin")) {
+                        allowFrozen = true;
+                    }
+                }
+
+                const data = await db.getLiveLeaderboardData({ allowFrozen });
+                return Res(JSON.stringify({ result: data }), { status: 200 });
+            })
+        },
+
+        "/admin/leaderboard/settings": {
+            OPTIONS: () => Res(null, { status: 204 }),
+            GET: handler(async req => {
+                await requireAdmin(req);
+                const { settings, error } = await db.getAllContestSettings();
+                if (error) throw new HttpError(error, 500);
+                return Res(JSON.stringify({ result: settings }), { status: 200 });
+            }),
+            POST: handler(async req => {
+                await requireAdmin(req);
+                const body = await parseJSON<any>(req);
+                if (body.leaderboard_frozen !== undefined) {
+                    await db.setContestSetting("leaderboard_frozen", String(body.leaderboard_frozen));
+                    if (body.leaderboard_frozen === true || body.leaderboard_frozen === "true") {
+                        await db.setContestSetting("freeze_time", new Date().toISOString());
+                    } else {
+                        await db.setContestSetting("freeze_time", "");
+                    }
+                }
+                if (body.leaderboard_visible !== undefined) {
+                    await db.setContestSetting("leaderboard_visible", String(body.leaderboard_visible));
+                }
+                if (body.contest_title !== undefined) {
+                    await db.setContestSetting("contest_title", String(body.contest_title));
+                }
+
+                notifyLeaderboardUpdate();
+                const { settings } = await db.getAllContestSettings();
+                return Res(JSON.stringify({ result: settings }), { status: 200 });
+            })
+        },
+
         "/": Response.redirect("/login"),
     },
 
@@ -1193,6 +1319,17 @@ const server = Bun.serve<WSData>({
                 if (server.upgrade(req, { data: wsData })) {
                     return;
                 }
+            }
+        }
+
+        if (url.searchParams.get("spectator") === "true" || url.searchParams.get("type") === "leaderboard") {
+            const wsData: WSData = {
+                role: "spectator",
+                id: Math.floor(1000 + Math.random() * 9000),
+                name: "Spectator"
+            };
+            if (server.upgrade(req, { data: wsData })) {
+                return;
             }
         }
 
@@ -1259,6 +1396,23 @@ async function notifySystemUpdate(id: number) {
     if (system) {
         wsManager.broadcastAdmins({ type: "system_updated", id, data: system });
         wsManager.sendToSystem(id, { type: "update", data: system });
+        wsManager.broadcastAll({ type: "system_update", id, data: system });
+        if (system.status === 'exam') {
+            wsManager.broadcastAll({
+                type: "exam_start",
+                system_id: id,
+                code: system.code,
+                exam_type: system.exam_type
+            });
+        }
+    }
+}
+
+function notifyLeaderboardUpdate() {
+    try {
+        wsManager.broadcastLeaderboard({ type: "leaderboard_update" });
+    } catch (e) {
+        console.error("Failed to broadcast leaderboard update", e);
     }
 }
 

@@ -82,6 +82,14 @@ The platform includes 24 competition-grade debugging questions organized into 8 
   - Filterable timeline of participant activities, tab switches, and submissions with accessible modal inspectors and Escape key dismissal.
 - **Zero Warnings**: Strict SvelteKit 5 and TypeScript check compliance (0 errors, 0 warnings).
 
+### 🏆 Real-Time Arena Leaderboard & Spectator Mode (`/leaderboard`)
+- **ICPC-Style Problem Matrix**: Real-time solve status per problem (`✔` green with attempt count, `✖` red for unsuccessful attempts), solve timestamps, and golden lightning badges (`⚡`) for global first solves.
+- **Top 3 Winner Podium**: Dedicated Gold, Silver, and Bronze podium cards displaying candidate handle, PC workstation, score, and tiebreaker penalty minutes.
+- **Dual Competition Tracks**: Instant toggle between **Coding Arena** (points & penalty) and **Typing Speed** (WPM & accuracy).
+- **Projector-Ready Controls**: Native fullscreen mode, hands-free auto-scrolling with pause on bounds, and celebratory Web Audio API solve chimes.
+- **Scoreboard Freeze Control**: Proctors can freeze the public scoreboard during the final minutes to maintain awards suspense while evaluations continue in the background.
+- **WebSocket Broadcast Streaming**: Instant updates across all connected spectator screens without browser reloading.
+
 ---
 
 ## 🛠️ Architecture & Tech Stack
@@ -223,6 +231,7 @@ bun run dev -- --host
 | :--- | :--- | :--- |
 | **Candidate Terminal** | [http://localhost:5173/login](http://localhost:5173/login) | Terminal registration and candidate OTP login |
 | **Admin Dashboard** | [http://localhost:5173/admin/login](http://localhost:5173/admin/login) | Management portal for proctors and admins |
+| **Spectator / Projector Leaderboard** | [http://localhost:5173/leaderboard](http://localhost:5173/leaderboard) | Live contest scoreboard with ICPC problem matrix, podium & freeze mode |
 | **Backend REST API** | [http://localhost:3000](http://localhost:3000) | JSON API & WebSocket upgrade server |
 
 ### Default Superadmin Credentials

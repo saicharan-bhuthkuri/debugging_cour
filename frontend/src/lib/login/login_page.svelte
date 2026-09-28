@@ -13,6 +13,19 @@
         on_check_system?: (systemNumber: string) => Promise<boolean>;
         system_status?: "ONLINE" | "OFFLINE" | "BOOKED";
         assigned_user?: string | null;
+        assigned_user_details?: {
+            name: string;
+            branch?: string;
+            year?: number;
+            college?: string;
+            phone?: string;
+            role?: string;
+        } | null;
+        level_info?: {
+            id?: number;
+            name?: string;
+            duration?: number;
+        } | null;
         exam_type?: string;
         systemNumber?: string;
         on_logout?: () => void;
@@ -28,6 +41,8 @@
         on_check_system,
         system_status = "ONLINE",
         assigned_user = null,
+        assigned_user_details = null,
+        level_info = null,
         exam_type = "debug",
         systemNumber: initialSystemNumber = "",
         on_logout
@@ -179,14 +194,53 @@
                             <h1 class="glitch-text">{systemNumber}</h1>
                         </div>
 
-                        <div class="status-row">
-                            <div class="status-item">
-                                <span class="label">ASSIGNMENT</span>
-                                <p class="value">{assigned_user || "—"}</p>
+                        <!-- ASSIGNED MEMBER & PROTOCOL PROFILE CARD -->
+                        <div class="candidate-card">
+                            <div class="candidate-card-top">
+                                <div class="candidate-avatar">
+                                    {(assigned_user_details?.name || assigned_user || "?").charAt(0).toUpperCase()}
+                                </div>
+                                <div class="candidate-identity">
+                                    <div class="candidate-badges">
+                                        <span class="badge-role-tag">ASSIGNED MEMBER</span>
+                                        {#if assigned_user_details?.role}
+                                            <span class="badge-role-sub">{assigned_user_details.role.toUpperCase()}</span>
+                                        {/if}
+                                    </div>
+                                    <div class="candidate-name">{assigned_user_details?.name || assigned_user || "Assigned"}</div>
+                                </div>
                             </div>
-                            <div class="status-item">
-                                <span class="label">PROTOCOL</span>
-                                <p class="value text-white">{getExamTypeText(exam_type)}</p>
+
+                            <div class="candidate-specs">
+                                <div class="spec-cell">
+                                    <span class="spec-label">COLLEGE / ORG</span>
+                                    <span class="spec-value">{assigned_user_details?.college || "—"}</span>
+                                </div>
+                                <div class="spec-cell">
+                                    <span class="spec-label">BRANCH & YEAR</span>
+                                    <span class="spec-value">
+                                        {assigned_user_details?.branch || "General"}
+                                        {#if assigned_user_details?.year}
+                                            <span class="text-white/40"> • </span>Yr {assigned_user_details.year}
+                                        {/if}
+                                    </span>
+                                </div>
+                                {#if assigned_user_details?.phone}
+                                    <div class="spec-cell">
+                                        <span class="spec-label">CANDIDATE ID / PHONE</span>
+                                        <span class="spec-value font-mono">{assigned_user_details.phone}</span>
+                                    </div>
+                                {/if}
+                                <div class="spec-cell">
+                                    <span class="spec-label">PROTOCOL</span>
+                                    <span class="spec-value text-cyan-400 font-bold">{getExamTypeText(exam_type)}</span>
+                                </div>
+                                {#if level_info?.name}
+                                    <div class="spec-cell spec-cell-full">
+                                        <span class="spec-label">ASSIGNED CHALLENGE</span>
+                                        <span class="spec-value text-blue-300 font-semibold">{level_info.name}</span>
+                                    </div>
+                                {/if}
                             </div>
                         </div>
 
@@ -225,9 +279,12 @@
 
                             <div class="status-row justify-center! gap-12 mt-8">
                                 <div class="status-item text-center">
-                                    <span class="label block mb-2">OPERATOR</span>
+                                    <span class="label block mb-2">ASSIGNED OPERATOR</span>
                                     {#key assigned_user}
-                                        <p class="value text-xl" in:fly={{ y: 20, duration: 300 }}>{assigned_user || "WAITING..."}</p>
+                                        <p class="value text-xl" in:fly={{ y: 20, duration: 300 }}>{assigned_user_details?.name || assigned_user || "WAITING..."}</p>
+                                        {#if assigned_user_details?.college}
+                                            <p class="text-xs text-cyan-400/70 mt-1 font-mono">{assigned_user_details.college} {assigned_user_details.branch ? `• ${assigned_user_details.branch}` : ''}</p>
+                                        {/if}
                                     {/key}
                                 </div>
                                 <div class="status-item text-center">

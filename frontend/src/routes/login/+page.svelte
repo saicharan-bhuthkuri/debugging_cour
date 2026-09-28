@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, onDestroy } from "svelte";
     import LoginPage from "$lib/login/login_page.svelte";
     import { setToken } from "$lib/login/login_state.svelte";
     import { api } from "$lib/api";
@@ -12,18 +12,37 @@
     let examType = $state("debug");
     let levelInfo = $state<{id: number, name: string, duration: number} | null>(null);
     let isStarting = $state(false);
+    let pollInterval: any = null;
 
     onMount(async () => {
         const saved = localStorage.getItem("system_code");
         if (saved) {
              await checkSystem(saved);
         }
+
+        // Periodic status poll as a fail-safe backup for WebSocket
+        pollInterval = setInterval(async () => {
+            if (currentSystemCode && !isStarting && !showStartDialog) {
+                try {
+                    const res = await api("/system/check", "POST", { code: currentSystemCode });
+                    if (res && res.status && res.status.toLowerCase() === 'exam') {
+                        console.log("Exam mode detected via background poll! Launching...");
+                        handleStartExam();
+                    }
+                } catch {}
+            }
+        }, 3000);
+    });
+
+    onDestroy(() => {
+        if (pollInterval) clearInterval(pollInterval);
     });
 
     function handleLogout() {
         if (confirm("Disconnect system?")) {
             localStorage.removeItem("system_code");
             localStorage.removeItem("login_token");
+            localStorage.removeItem("system_token");
             location.reload();
         }
     }
@@ -31,6 +50,14 @@
     // System State Management
     let systemStatus = $state("ONLINE");
     let assignedUser = $state<string | null>(null);
+    let assignedUserDetails = $state<{
+        name: string;
+        branch?: string;
+        year?: number;
+        college?: string;
+        phone?: string;
+        role?: string;
+    } | null>(null);
     let currentSystemCode = $state("");
     let showStartDialog = $state(false);
 
@@ -39,7 +66,7 @@
         // ws.state.connected is reactive
         if (ws.state.connected) {
              const unsubscribe = ws.subscribe((msg: any) => {
-                 if ((msg.type === "update" || msg.type === "system_online") && msg.data) {
+                 if ((msg.type === "update" || msg.type === "system_online" || msg.type === "system_update") && msg.data) {
                      const sys = msg.data;
                      
                      // Filter updates for current system if we have a code
@@ -52,19 +79,36 @@
                      else systemStatus = 'ONLINE';
 
                      assignedUser = sys.assigned_to_name || null;
+                     assignedUserDetails = sys.assigned_user || (sys.assigned_to_name ? {
+                         name: sys.assigned_to_name,
+                         branch: sys.assigned_user_branch || "",
+                         year: sys.assigned_user_year || null,
+                         college: sys.assigned_user_college || "",
+                         phone: sys.assigned_user_phone || "",
+                         role: sys.assigned_user_role || "member"
+                     } : null);
                      
                      if (sys.exam_type) examType = sys.exam_type;
                      if (sys.level) levelInfo = sys.level;
+                     else if (sys.level_name) {
+                         levelInfo = { id: sys.assigned_level_id, name: sys.level_name, duration: sys.level_duration || 900 };
+                     }
 
                       // Auto-start if admin pushed to exam mode while we are on login page
                       if (status === 'exam' && !isStarting && !showStartDialog) {
                           console.log("Admin forced Exam Mode via WS. Auto-starting...");
                           handleStartExam();
                       }
+                 } else if (msg.type === "exam_start" && msg.code) {
+                     if (currentSystemCode && msg.code.toLowerCase() === currentSystemCode.toLowerCase() && !isStarting) {
+                         console.log("exam_start signal received via WS! Auto-starting...");
+                         handleStartExam();
+                     }
                  } else if (msg.type === "unregistered") {
                      // System deleted, refresh or reset
                      localStorage.removeItem("system_code");
                      localStorage.removeItem("login_token");
+                     localStorage.removeItem("system_token");
                      location.reload();
                  }
              });
@@ -83,7 +127,16 @@
                 if (status === 'booked' || status === 'exam') systemStatus = 'BOOKED';
                 else if (status === 'offline') systemStatus = 'OFFLINE';
                 else systemStatus = 'ONLINE';
+
                 assignedUser = res.assigned_to_name || null;
+                assignedUserDetails = res.assigned_user || (res.assigned_to_name ? {
+                    name: res.assigned_to_name,
+                    branch: res.assigned_user_branch || "",
+                    year: res.assigned_user_year || null,
+                    college: res.assigned_user_college || "",
+                    phone: res.assigned_user_phone || "",
+                    role: res.assigned_user_role || "member"
+                } : null);
 
                 if (res.level) {
                     levelInfo = res.level;
@@ -139,7 +192,8 @@
             console.log("Exam Entry Attempt:", data);
             
             // Verify OTP for exam entry
-            const res = await api("/system/verify", "POST", { otp: data.otp }, localStorage.getItem("login_token") || "");
+            const token = localStorage.getItem("system_token") || localStorage.getItem("login_token") || "";
+            const res = await api("/system/verify", "POST", { otp: data.otp }, token);
             
             if (res === "Verified") {
                 // Show dialog to start
@@ -157,18 +211,27 @@
         if (isStarting) return;
         isStarting = true;
         try {
-            const res = await api("/system/start", "POST", {}, localStorage.getItem("login_token") || "");
+            const token = localStorage.getItem("system_token") || localStorage.getItem("login_token") || "";
+            const res = await api("/system/start", "POST", { code: currentSystemCode }, token);
             if (res && res.sessionId) {
                 localStorage.setItem("exam_session_id", res.sessionId.toString());
                 if (res.duration) {
                     localStorage.setItem("exam_duration", res.duration.toString());
                 }
             }
+            if (token) {
+                localStorage.setItem("login_token", token);
+                setToken(token);
+            }
             goto(`/${examType}`);
-        } catch (e) {
-            console.error("Failed to start exam", e);
-            error = "Failed to start exam";
-            isStarting = false;
+        } catch (e: any) {
+            console.error("Failed to start exam via API, attempting direct navigation if exam mode active", e);
+            const token = localStorage.getItem("system_token") || localStorage.getItem("login_token") || "";
+            if (token) {
+                localStorage.setItem("login_token", token);
+                setToken(token);
+            }
+            goto(`/${examType}`);
         }
     }
 
@@ -186,8 +249,8 @@
     let uiProps = $derived(examType === 'typing' ? {
         description: "Initiate typing sequence. Measure words per minute, accuracy, and consistency within the designated time window.",
         grid: [
-            { h2: "60s", p: "Time Limit" },
-            { h2: "Inf", p: "WPM Target" },
+            { h2: formatDuration(levelInfo?.duration || 60), p: "Time Limit" },
+            { h2: levelInfo?.name || "Typing", p: "Level" },
             { h2: "Accuracy", p: "Core Focus" },
             { h2: "Solo", p: "Unit Type" }
         ],
@@ -244,6 +307,8 @@
     on_check_system={checkSystem}
     system_status={systemStatus as "ONLINE" | "OFFLINE" | "BOOKED"}
     assigned_user={assignedUser}
+    assigned_user_details={assignedUserDetails}
+    level_info={levelInfo}
     exam_type={examType}
     systemNumber={currentSystemCode}
     on_logout={handleLogout}

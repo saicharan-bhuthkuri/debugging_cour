@@ -100,6 +100,17 @@ export async function initDB() {
             PRIMARY KEY (session_id, question_id)
         )`;
 
+        await db`CREATE TABLE IF NOT EXISTS contest_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )`;
+        try {
+            await db`INSERT OR IGNORE INTO contest_settings (key, value) VALUES ('leaderboard_visible', 'true')`;
+            await db`INSERT OR IGNORE INTO contest_settings (key, value) VALUES ('leaderboard_frozen', 'false')`;
+            await db`INSERT OR IGNORE INTO contest_settings (key, value) VALUES ('freeze_time', '')`;
+            await db`INSERT OR IGNORE INTO contest_settings (key, value) VALUES ('contest_title', 'Debugging Championship 2026')`;
+        } catch {}
+
         // Performance Indexes
         await db`CREATE INDEX IF NOT EXISTS idx_logs_session_type ON system_logs(exam_session_id, log_type)`;
         await db`CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON system_logs(timestamp)`;
@@ -277,10 +288,19 @@ export async function updateUser(id: number, user: Partial<User>) {
 export async function getAllSystems() {
     try {
         const systems = await db`
-            SELECT s.*, u.name as assigned_to_name, dl.name as level_name, dl.duration as level_duration
+            SELECT s.*, 
+                   u.name as assigned_to_name,
+                   u.branch as assigned_user_branch,
+                   u.year as assigned_user_year,
+                   u.college as assigned_user_college,
+                   u.phone as assigned_user_phone,
+                   u.role as assigned_user_role,
+                   COALESCE(dl.name, tl.name) as level_name,
+                   COALESCE(dl.duration, tl.time_limit) as level_duration
             FROM systems s 
             LEFT JOIN users u ON s.assigned_to = u.id
-            LEFT JOIN debug_levels dl ON s.assigned_level_id = dl.id
+            LEFT JOIN debug_levels dl ON (s.exam_type != 'typing' AND s.assigned_level_id = dl.id)
+            LEFT JOIN typing_levels tl ON (s.exam_type = 'typing' AND s.assigned_level_id = tl.id)
         `;
         return { systems };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
@@ -381,9 +401,19 @@ export async function bulkUpdateSystems(ids: number[], data: any) {
 export async function getSystemByCode(code: string) {
     try {
         const systems = await db`
-            SELECT s.*, u.name as assigned_to_name 
+            SELECT s.*, 
+                   u.name as assigned_to_name,
+                   u.branch as assigned_user_branch,
+                   u.year as assigned_user_year,
+                   u.college as assigned_user_college,
+                   u.phone as assigned_user_phone,
+                   u.role as assigned_user_role,
+                   COALESCE(dl.name, tl.name) as level_name,
+                   COALESCE(dl.duration, tl.time_limit) as level_duration
             FROM systems s 
             LEFT JOIN users u ON s.assigned_to = u.id
+            LEFT JOIN debug_levels dl ON (s.exam_type != 'typing' AND s.assigned_level_id = dl.id)
+            LEFT JOIN typing_levels tl ON (s.exam_type = 'typing' AND s.assigned_level_id = tl.id)
             WHERE s.code = ${code}
         `;
         return { system: systems[0] };
@@ -393,12 +423,29 @@ export async function getSystemByCode(code: string) {
 export async function getSystemById(id: number) {
     try {
         const systems = await db`
-            SELECT s.*, u.name as assigned_to_name 
+            SELECT s.*, 
+                   u.name as assigned_to_name,
+                   u.branch as assigned_user_branch,
+                   u.year as assigned_user_year,
+                   u.college as assigned_user_college,
+                   u.phone as assigned_user_phone,
+                   u.role as assigned_user_role,
+                   COALESCE(dl.name, tl.name) as level_name,
+                   COALESCE(dl.duration, tl.time_limit) as level_duration
             FROM systems s 
             LEFT JOIN users u ON s.assigned_to = u.id
+            LEFT JOIN debug_levels dl ON (s.exam_type != 'typing' AND s.assigned_level_id = dl.id)
+            LEFT JOIN typing_levels tl ON (s.exam_type = 'typing' AND s.assigned_level_id = tl.id)
             WHERE s.id = ${id}
         `;
         return { system: systems[0] };
+    } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
+}
+
+export async function getActiveExamSession(systemId: number) {
+    try {
+        const sessions = await db`SELECT * FROM exam_sessions WHERE system_id = ${systemId} AND status = 'ongoing' ORDER BY id DESC LIMIT 1`;
+        return { session: sessions[0] };
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
 
@@ -491,9 +538,12 @@ export async function createDebugLevel(data: any) {
 
 export async function updateDebugLevel(id: number, data: any) {
     try {
-        const qIds = JSON.stringify(data.question_ids || []);
-        const duration = data.duration || 900;
-        await db`UPDATE debug_levels SET name = ${data.name}, order_num = ${data.order}, question_ids = ${qIds}, duration = ${duration} WHERE id = ${id}`;
+        await db`UPDATE debug_levels SET 
+            name = CASE WHEN ${data.name === undefined} THEN name ELSE ${data.name} END,
+            order_num = CASE WHEN ${data.order === undefined} THEN order_num ELSE ${data.order} END,
+            question_ids = CASE WHEN ${data.question_ids === undefined} THEN question_ids ELSE ${JSON.stringify(data.question_ids)} END,
+            duration = CASE WHEN ${data.duration === undefined} THEN duration ELSE ${data.duration} END
+            WHERE id = ${id}`;
         return {};
     } catch (error) { return { error: error instanceof Error ? error.message : "Unknown error" }; }
 }
@@ -1080,3 +1130,392 @@ export async function getTypingResultGroupOptions() {
         return { error: error instanceof Error ? error.message : "Unknown error" };
     }
 }
+
+// --- CONTEST SETTINGS & LIVE LEADERBOARD ---
+
+export async function getContestSetting(key: string, defaultValue = ""): Promise<string> {
+    try {
+        const rows = await db`SELECT value FROM contest_settings WHERE key = ${key}`;
+        if (rows.length > 0 && rows[0]?.value !== undefined) return rows[0].value;
+        return defaultValue;
+    } catch {
+        return defaultValue;
+    }
+}
+
+export async function setContestSetting(key: string, value: string) {
+    try {
+        await db`INSERT INTO contest_settings (key, value) VALUES (${key}, ${value})
+            ON CONFLICT(key) DO UPDATE SET value = ${value}`;
+        return { success: true };
+    } catch (e: any) {
+        return { error: e.message || "Failed to set contest setting" };
+    }
+}
+
+export async function getAllContestSettings() {
+    try {
+        const rows = await db`SELECT key, value FROM contest_settings`;
+        const map: Record<string, string> = {
+            leaderboard_visible: "true",
+            leaderboard_frozen: "false",
+            freeze_time: "",
+            contest_title: "Debugging Championship 2026"
+        };
+        for (const row of rows) {
+            map[row.key] = row.value;
+        }
+        return { settings: map };
+    } catch (e: any) {
+        return { settings: {
+            leaderboard_visible: "true",
+            leaderboard_frozen: "false",
+            freeze_time: "",
+            contest_title: "Debugging Championship 2026"
+        }, error: e.message };
+    }
+}
+
+export async function getLiveLeaderboardData(options: { allowFrozen?: boolean } = {}) {
+    try {
+        const settingsRes = await getAllContestSettings();
+        const settings = settingsRes.settings;
+        const isFrozen = settings.leaderboard_frozen === "true" && !options.allowFrozen;
+        const freezeTime = settings.freeze_time || null;
+        const isVisible = settings.leaderboard_visible !== "false";
+
+        // 1. Fetch questions for matrix columns
+        const { questions: allQuestions } = await getAllDebugQuestions();
+        const questionMap = new Map<number, any>((allQuestions || []).map((q: any) => [q.id, q]));
+
+        // 2. Fetch all debug sessions
+        const sessions = await db`SELECT es.*,
+            u.name as user_name, u.branch, u.college, u.year as user_year,
+            s.code as system_code, s.assigned_level_id
+            FROM exam_sessions es
+            LEFT JOIN users u ON es.user_id = u.id
+            LEFT JOIN systems s ON es.system_id = s.id
+            WHERE es.exam_mode = 'debug'
+            ORDER BY es.start_time ASC
+        `;
+
+        // 3. Fetch all grades
+        const allGrades = await db`SELECT * FROM debug_submission_grades`;
+        const gradesMap = new Map<number, Map<number, boolean>>(); // session_id -> question_id -> is_correct
+        for (const g of allGrades) {
+            if (!gradesMap.has(g.session_id)) gradesMap.set(g.session_id, new Map());
+            gradesMap.get(g.session_id)!.set(g.question_id, g.is_correct === 1);
+        }
+
+        // 4. Fetch all relevant logs (SUBMIT, AUTO_SUBMIT_TIMEOUT, AUTO_SUBMIT_FINAL, EXAM_START)
+        const logs = await db`SELECT sl.*, u.name as user_name
+            FROM system_logs sl
+            LEFT JOIN users u ON sl.user_id = u.id
+            WHERE sl.log_type IN ('SUBMIT', 'AUTO_SUBMIT_TIMEOUT', 'AUTO_SUBMIT_FINAL', 'EXAM_START')
+            ORDER BY sl.timestamp ASC
+        `;
+
+        // Track global first solves across all participants for each question
+        const firstSolves = new Map<number, { session_id: number, timestamp: string }>();
+
+        // Pre-group logs by session
+        const logsBySession = new Map<number, any[]>();
+        for (const log of logs) {
+            // If frozen for public viewers, ignore submissions after freezeTime
+            if (isFrozen && freezeTime && log.timestamp > freezeTime) {
+                continue;
+            }
+            if (!logsBySession.has(log.exam_session_id)) {
+                logsBySession.set(log.exam_session_id, []);
+            }
+            logsBySession.get(log.exam_session_id)!.push(log);
+        }
+
+        const recentActivity: any[] = [];
+        let totalSolvesCount = 0;
+        let totalSubmissionsCount = 0;
+
+        // Process sessions to build participant rows
+        const participantRows: any[] = [];
+
+        for (const session of sessions) {
+            const sessionLogs = logsBySession.get(session.id) || [];
+            const sessionGrades = gradesMap.get(session.id) || new Map();
+
+            let startTime = session.start_time ? new Date(session.start_time).getTime() : 0;
+            const startLog = sessionLogs.find(l => l.log_type === 'EXAM_START');
+            if (startLog) {
+                try {
+                    const parsed = typeof startLog.data === 'string' ? JSON.parse(startLog.data) : startLog.data;
+                    if (parsed?.timestamp) startTime = new Date(parsed.timestamp).getTime();
+                    else startTime = new Date(startLog.timestamp).getTime();
+                } catch {
+                    startTime = new Date(startLog.timestamp).getTime();
+                }
+            }
+
+            let score = 0;
+            let totalPenalty = 0;
+            let solvedCount = 0;
+
+            // Map of question_id -> { solved, attempts, solveTimeMinutes, isFirstSolve }
+            const problems: Record<number, any> = {};
+
+            // Group submission logs by question_id
+            const questionLogs = new Map<number, any[]>();
+            for (const log of sessionLogs) {
+                if (log.log_type === 'SUBMIT' || log.log_type === 'AUTO_SUBMIT_TIMEOUT' || log.log_type === 'AUTO_SUBMIT_FINAL') {
+                    totalSubmissionsCount++;
+                    let logData: any = {};
+                    try { logData = typeof log.data === 'string' ? JSON.parse(log.data) : (log.data || {}); } catch { }
+                    const qId = logData.question_id;
+                    if (!qId) continue;
+                    if (!questionLogs.has(qId)) questionLogs.set(qId, []);
+                    questionLogs.get(qId)!.push({ ...log, parsedData: logData });
+                }
+            }
+
+            for (const [qId, qLogs] of questionLogs) {
+                const isOverallSolved = sessionGrades.get(qId) || false;
+                if (!problems[qId]) {
+                    problems[qId] = {
+                        solved: false,
+                        attempts: qLogs.length,
+                        solveTimeMinutes: null,
+                        firstSolveTimestamp: null,
+                        isFirstSolve: false
+                    };
+                }
+
+                if (isOverallSolved) {
+                    problems[qId].solved = true;
+                    // Find the solving log: either explicit is_correct === true, or the last submission
+                    let solveIdx = qLogs.findIndex(l => l.parsedData?.is_correct === true);
+                    if (solveIdx === -1) solveIdx = qLogs.length - 1; // Default to last submission
+                    
+                    const solvingLog = qLogs[solveIdx];
+                    const attempts = solveIdx + 1;
+                    problems[qId].attempts = attempts;
+
+                    const subTime = new Date(solvingLog.timestamp || solvingLog.parsedData?.timestamp || Date.now()).getTime();
+                    const elapsedMs = Math.max(0, subTime - (startTime || subTime));
+                    const elapsedMins = Math.floor(elapsedMs / 60000);
+                    problems[qId].solveTimeMinutes = elapsedMins;
+                    problems[qId].firstSolveTimestamp = solvingLog.timestamp;
+
+                    // Global first solve check
+                    if (!firstSolves.has(qId)) {
+                        firstSolves.set(qId, { session_id: session.id, timestamp: solvingLog.timestamp });
+                        problems[qId].isFirstSolve = true;
+                    } else if (firstSolves.get(qId)!.session_id === session.id) {
+                        problems[qId].isFirstSolve = true;
+                    }
+
+                    // Score calculation: Easy=5, Medium=10, Hard=15
+                    const qInfo = questionMap.get(qId);
+                    let pts = 5;
+                    const diff = qInfo?.difficulty?.toLowerCase();
+                    if (diff === 'medium') pts = 10;
+                    else if (diff === 'hard') pts = 15;
+                    score += pts;
+                    solvedCount++;
+                    totalSolvesCount++;
+
+                    // ICPC penalty: solveTimeMinutes + (failedAttempts * 20)
+                    const penalty = elapsedMins + ((attempts - 1) * 20);
+                    totalPenalty += penalty;
+
+                    // Recent activity
+                    recentActivity.push({
+                        user_name: session.user_name || "Contestant",
+                        system_code: session.system_code,
+                        question_id: qId,
+                        question_title: qInfo?.title || `Question ${qId}`,
+                        points: pts,
+                        timestamp: solvingLog.timestamp,
+                        time_minutes: elapsedMins
+                    });
+                }
+            }
+
+            // Flag first solve if this session held the earliest record
+            for (const [qIdStr, prob] of Object.entries(problems)) {
+                const qId = Number(qIdStr);
+                if (prob.solved && firstSolves.get(qId)?.session_id === session.id) {
+                    prob.isFirstSolve = true;
+                }
+            }
+
+            // Per-session participant object
+            const row = {
+                session_id: session.id,
+                user_id: session.user_id,
+                user_name: session.user_name || "Anonymous",
+                college: session.college || "N/A",
+                branch: session.branch || "N/A",
+                year: session.user_year || 0,
+                system_code: session.system_code || "PC-?",
+                status: session.status,
+                score,
+                penalty: totalPenalty,
+                solved_count: solvedCount,
+                start_time: session.start_time,
+                problems
+            };
+            participantRows.push(row);
+        }
+
+        // 5. Deduplicate sessions by contestant (user_id):
+        // If a contestant has multiple sessions (e.g. restarts or test runs), keep their best session
+        const bestByUser = new Map<number, any>();
+        for (const row of participantRows) {
+            const uid = row.user_id;
+            if (!bestByUser.has(uid)) {
+                bestByUser.set(uid, row);
+            } else {
+                const prev = bestByUser.get(uid);
+                // Prefer higher score, then lower penalty, then higher solved count, then latest session
+                const isBetter = row.score > prev.score ||
+                    (row.score === prev.score && row.penalty < prev.penalty) ||
+                    (row.score === prev.score && row.penalty === prev.penalty && row.solved_count > prev.solved_count) ||
+                    (row.score === prev.score && row.penalty === prev.penalty && row.session_id > prev.session_id);
+                if (isBetter) {
+                    bestByUser.set(uid, row);
+                }
+            }
+        }
+
+        // 6. Include ALL registered member attendees (even if they haven't submitted or have 0 score)
+        const allMembers = await db`
+            SELECT u.id as user_id, u.name as user_name, u.branch, u.college, u.year as user_year,
+                   s.code as assigned_system_code, s.status as system_status
+            FROM users u
+            LEFT JOIN systems s ON s.assigned_to = u.id
+            WHERE u.role = 'member'
+        `;
+
+        for (const m of allMembers) {
+            const uid = m.user_id;
+            if (bestByUser.has(uid)) {
+                // If system code was missing on session, populate from system assignment
+                const existing = bestByUser.get(uid);
+                if ((!existing.system_code || existing.system_code === "PC-?") && m.assigned_system_code) {
+                    existing.system_code = m.assigned_system_code;
+                }
+            } else {
+                // Add registered attendee with 0 score
+                bestByUser.set(uid, {
+                    session_id: 0,
+                    user_id: uid,
+                    user_name: m.user_name || "Contestant",
+                    college: m.college || "N/A",
+                    branch: m.branch || "N/A",
+                    year: m.user_year || 1,
+                    system_code: m.assigned_system_code || "PC-?",
+                    status: m.system_status === 'exam' ? 'ongoing' : (m.system_status || 'booked'),
+                    score: 0,
+                    penalty: 0,
+                    solved_count: 0,
+                    start_time: null,
+                    problems: {}
+                });
+            }
+        }
+
+        // Final deduplicated list of all attendees
+        const deduplicatedRankings = Array.from(bestByUser.values());
+
+        // Sort rankings:
+        // 1. Score DESC
+        // 2. Penalty ASC
+        // 3. Solved count DESC
+        // 4. Start time (earlier is better)
+        // 5. User ID ASC
+        deduplicatedRankings.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            if (a.penalty !== b.penalty) return a.penalty - b.penalty;
+            if (b.solved_count !== a.solved_count) return b.solved_count - a.solved_count;
+            if (a.start_time && b.start_time) {
+                return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+            }
+            if (a.start_time && !b.start_time) return -1;
+            if (!a.start_time && b.start_time) return 1;
+            return a.user_id - b.user_id;
+        });
+
+        // Assign ranks (with tied rank handling)
+        for (let i = 0; i < deduplicatedRankings.length; i++) {
+            if (i > 0) {
+                const prev = deduplicatedRankings[i - 1];
+                const curr = deduplicatedRankings[i];
+                if (curr.score === prev.score && curr.penalty === prev.penalty && curr.solved_count === prev.solved_count) {
+                    curr.rank = prev.rank;
+                } else {
+                    curr.rank = i + 1;
+                }
+            } else {
+                deduplicatedRankings[i].rank = 1;
+            }
+        }
+
+        // Sort recentActivity by timestamp DESC, keep top 12
+        recentActivity.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        const topRecentActivity = recentActivity.slice(0, 12);
+
+        // Fetch Typing Rankings
+        const typingRes = await getTypingResults();
+        const typingRankings = (typingRes.results || [])
+            .map((r: any) => ({
+                user_name: r.user_name || "Typist",
+                college: r.college || "N/A",
+                branch: r.branch || "N/A",
+                system_code: r.system_code || "PC-?",
+                wpm: r.best_wpm || 0,
+                accuracy: r.best_accuracy || 0,
+                raw_wpm: r.best_raw || 0,
+                consistency: r.best_consistency || 0,
+                passed: r.passed,
+                attempts: r.total_attempts || 1
+            }))
+            .sort((a: any, b: any) => {
+                if (b.wpm !== a.wpm) return b.wpm - a.wpm;
+                return b.accuracy - a.accuracy;
+            });
+
+        typingRankings.forEach((t: any, idx: number) => { t.rank = idx + 1; });
+
+        return {
+            rankings: deduplicatedRankings,
+            typing_rankings: typingRankings,
+            questions: (allQuestions || []).map((q: any) => ({
+                id: q.id,
+                title: q.title,
+                difficulty: q.difficulty,
+                language: q.language,
+                set_name: q.set_name
+            })),
+            recent_activity: topRecentActivity,
+            settings: {
+                is_frozen: isFrozen,
+                visible: isVisible,
+                title: settings.contest_title || "Lab Coding Competition",
+                freeze_time: settings.freeze_time || null
+            },
+            stats: {
+                total_participants: deduplicatedRankings.length,
+                total_solves: totalSolvesCount,
+                total_submissions: totalSubmissionsCount
+            }
+        };
+    } catch (error: any) {
+        return {
+            error: error instanceof Error ? error.message : "Unknown error",
+            rankings: [],
+            typing_rankings: [],
+            questions: [],
+            recent_activity: [],
+            settings: { is_frozen: false, visible: true, title: "Lab Coding Competition", freeze_time: null },
+            stats: { total_participants: 0, total_solves: 0, total_submissions: 0 }
+        };
+    }
+}

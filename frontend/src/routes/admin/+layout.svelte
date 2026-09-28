@@ -275,6 +275,21 @@
            {/if}
         </a>
 
+        <a href="/leaderboard" 
+           target="_blank"
+           class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent text-amber-600 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200
+           {isSidebarCollapsed ? 'justify-center px-2' : ''}"
+           title={isSidebarCollapsed ? "Live Leaderboard (Projector)" : ""}
+        >
+           <span class="text-base shrink-0">⚡</span>
+           {#if !isSidebarCollapsed}
+             <span class="truncate flex items-center justify-between w-full">
+               <span>Leaderboard</span>
+               <span class="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-mono font-bold">LIVE ↗</span>
+             </span>
+           {/if}
+        </a>
+
         <a href="/admin/logs" 
            class="flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent
            {page.url.pathname.includes('/logs') 
@@ -419,6 +434,17 @@
                       <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
                    </svg>
                    Results
+                </a>
+
+                <a href="/leaderboard"
+                   target="_blank"
+                   onclick={() => isMobileMenuOpen = false} 
+                   class="flex items-center justify-between px-4 py-3 rounded-lg font-medium transition-all duration-200 border border-transparent text-amber-600 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200">
+                   <div class="flex items-center gap-3">
+                      <span class="text-base">⚡</span>
+                      <span>Leaderboard</span>
+                   </div>
+                   <span class="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-mono font-bold">LIVE ↗</span>
                 </a>
 
                 <a href="/admin/logs"

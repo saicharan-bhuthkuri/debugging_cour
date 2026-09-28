@@ -1464,7 +1464,7 @@ async function main() {
             name: l.name,
             order: l.order,
             question_ids: qids,
-            duration: 3600
+            duration: 900
         });
         console.log(`Created '${l.name}' (IDs: ${qids.join(', ')})`);
     }

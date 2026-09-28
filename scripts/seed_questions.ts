@@ -604,14 +604,14 @@ if __name__ == '__main__':
         name: "Level 1 - Core C Programming",
         order: 1,
         question_ids: cIds,
-        duration: 3600
+        duration: 900
     });
 
     await db.createDebugLevel({
         name: "Level 2 - Core Python Programming",
         order: 2,
         question_ids: pyIds,
-        duration: 3600
+        duration: 900
     });
 
     console.log(`\nSuccessfully seeded:`);

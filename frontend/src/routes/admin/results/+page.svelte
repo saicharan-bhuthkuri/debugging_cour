@@ -267,19 +267,114 @@
       activeTab = tab;
   }
 
+  // ── Contest / Leaderboard Settings ──
+  let contestSettings = $state<any>({
+      leaderboard_frozen: "false",
+      leaderboard_visible: "true",
+      contest_title: "Debugging Championship 2026"
+  });
+  let updatingSettings = $state(false);
+  let isEditTitleModalOpen = $state(false);
+  let newContestTitle = $state("");
+
+  async function fetchContestSettings() {
+      try {
+          const token = localStorage.getItem("login_token") || localStorage.getItem("admin_token") || "";
+          const res = await api("/admin/leaderboard/settings", "GET", null, token);
+          if (res) contestSettings = res;
+      } catch (e) { console.error("Failed to fetch contest settings", e); }
+  }
+
+  async function toggleFreezeScoreboard() {
+      updatingSettings = true;
+      try {
+          const token = localStorage.getItem("login_token") || localStorage.getItem("admin_token") || "";
+          const isCurrentlyFrozen = contestSettings.leaderboard_frozen === "true";
+          const res = await api("/admin/leaderboard/settings", "POST", {
+              leaderboard_frozen: !isCurrentlyFrozen
+          }, token);
+          if (res) contestSettings = res;
+      } catch (e: any) {
+          alert("Failed to update scoreboard settings: " + e.message);
+      } finally {
+          updatingSettings = false;
+      }
+  }
+
+  async function saveContestTitle() {
+      if (!newContestTitle.trim()) return;
+      updatingSettings = true;
+      try {
+          const token = localStorage.getItem("login_token") || localStorage.getItem("admin_token") || "";
+          const res = await api("/admin/leaderboard/settings", "POST", {
+              contest_title: newContestTitle.trim()
+          }, token);
+          if (res) {
+              contestSettings = res;
+              isEditTitleModalOpen = false;
+          }
+      } catch (e: any) {
+          alert("Failed to update arena title: " + e.message);
+      } finally {
+          updatingSettings = false;
+      }
+  }
+
   onMount(() => {
       fetchDebugOptions();
       fetchDebugResults();
       fetchTypingOptions();
       fetchTypingResults();
+      fetchContestSettings();
   });
 </script>
 
 <div class="space-y-6">
   <!-- Page Header & Tab Switcher -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-bold text-gray-900">Exam Results</h1>
+      <p class="text-sm text-gray-500 mt-0.5">Manage participant scores, review code submissions, and control live arena projector.</p>
+    </div>
+
+    <!-- Leaderboard Controls -->
+    <div class="flex items-center gap-2.5 flex-wrap">
+      <!-- Rename Contest Title Button -->
+      <button
+        onclick={() => { newContestTitle = contestSettings.contest_title || 'Debugging Championship 2026'; isEditTitleModalOpen = true; }}
+        class="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-all flex items-center gap-1.5 shadow-sm"
+        title="Rename competition title displayed on the live projector"
+      >
+        <span>✏️</span>
+        <span class="truncate max-w-40 md:max-w-none">Rename: <strong class="text-gray-900">{contestSettings.contest_title || 'Debugging Championship 2026'}</strong></span>
+      </button>
+
+      <!-- Freeze Toggle Button -->
+      <button
+        onclick={toggleFreezeScoreboard}
+        disabled={updatingSettings}
+        class="px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 shadow-sm {contestSettings.leaderboard_frozen === 'true'
+          ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+        title="When frozen, student submissions are still accepted, but the public scoreboard stops updating."
+      >
+        <span>{contestSettings.leaderboard_frozen === 'true' ? '🧊' : '❄️'}</span>
+        <span>{contestSettings.leaderboard_frozen === 'true' ? 'Scoreboard Frozen' : 'Freeze Scoreboard'}</span>
+      </button>
+
+      <!-- Open Projector Leaderboard -->
+      <a
+        href="/leaderboard"
+        target="_blank"
+        class="px-4 py-2 rounded-xl text-xs font-bold bg-gray-900 text-white hover:bg-black transition-all flex items-center gap-1.5 shadow-md hover:shadow-lg"
+      >
+        <span>⚡ Projector Leaderboard</span>
+        <span>↗</span>
+      </a>
+    </div>
+  </div>
+
   <div class="flex flex-col gap-4">
-    <h1 class="text-3xl font-bold text-gray-900">Exam Results</h1>
-    
     <!-- Tabs -->
     <div class="flex bg-gray-100 rounded-xl p-1 w-fit">
       <button
@@ -927,6 +1022,61 @@
         <div class="text-xs text-gray-400 text-right">
           Submitted at: {formatDate(inspectingSubmission.timestamp)}
         </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  RENAME ARENA TITLE MODAL                       -->
+<!-- ═══════════════════════════════════════════════ -->
+{#if isEditTitleModalOpen}
+  <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+        <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <span>⚡</span> Rename Contest Arena
+        </h3>
+        <button
+          onclick={() => isEditTitleModalOpen = false}
+          class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="p-6 space-y-4">
+        <div>
+          <label for="contest-name-input" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+            Contest / Leaderboard Name
+          </label>
+          <input
+            id="contest-name-input"
+            type="text"
+            bind:value={newContestTitle}
+            placeholder="e.g. Debugging Championship 2026"
+            class="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 text-sm font-medium text-gray-900"
+          />
+          <p class="text-xs text-gray-500 mt-1.5">
+            This title is displayed on the live projector screen at <code class="text-cyan-700 bg-cyan-50 px-1 py-0.5 rounded font-mono">/leaderboard</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-2.5">
+        <button
+          onclick={() => isEditTitleModalOpen = false}
+          class="px-4 py-2 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onclick={saveContestTitle}
+          disabled={updatingSettings || !newContestTitle.trim()}
+          class="px-5 py-2 rounded-xl text-sm font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition-colors shadow-sm disabled:opacity-50"
+        >
+          {updatingSettings ? 'Saving...' : 'Update Title'}
+        </button>
       </div>
     </div>
   </div>

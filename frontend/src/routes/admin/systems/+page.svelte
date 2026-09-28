@@ -682,21 +682,52 @@
                                 Assigned User
                             </h3>
                             {#if selectedSystem?.assigned_to_name}
-                                <div class="bg-blue-50 rounded-xl p-4 border border-blue-100 flex items-start gap-4 shadow-sm">
-                                     <div class="h-12 w-12 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center text-xl font-bold shrink-0 shadow-inner">
-                                        {selectedSystem?.assigned_to_name.charAt(0)}
-                                    </div>
-                                    <div class="flex-1">
-                                        <div class="text-lg font-semibold text-gray-900">{selectedSystem?.assigned_to_name}</div>
-                                        <div class="text-sm text-blue-700 font-medium">Currently Assigned</div>
-                                        <div class="mt-3 flex gap-2">
-                                            <button 
-                                                onclick={() => openAssignModal(selectedSystem)}
-                                                class="cursor-pointer px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-50 transition-colors shadow-sm"
-                                            >
-                                                Change User
-                                            </button>
+                                <div class="bg-blue-50/80 rounded-xl p-4 border border-blue-200 shadow-xs">
+                                    <div class="flex items-start gap-4">
+                                        <div class="h-12 w-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-xl font-bold shrink-0 shadow-md">
+                                            {selectedSystem?.assigned_to_name.charAt(0).toUpperCase()}
                                         </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-lg font-bold text-gray-900 truncate">{selectedSystem?.assigned_to_name}</span>
+                                                <span class="px-2 py-0.5 text-[10px] font-bold uppercase bg-blue-100 text-blue-800 rounded-full border border-blue-300">
+                                                    {selectedSystem?.assigned_user_role || 'Candidate'}
+                                                </span>
+                                            </div>
+                                            <div class="text-xs text-blue-700 font-medium mt-0.5">Currently Assigned</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Candidate Info Grid -->
+                                    <div class="mt-3 pt-3 border-t border-blue-100 grid grid-cols-2 gap-2 text-xs">
+                                        <div class="bg-white/80 p-2 rounded-lg border border-blue-100">
+                                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">College</span>
+                                            <span class="font-medium text-gray-800 truncate block">{selectedSystem?.assigned_user_college || '—'}</span>
+                                        </div>
+                                        <div class="bg-white/80 p-2 rounded-lg border border-blue-100">
+                                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Branch & Year</span>
+                                            <span class="font-medium text-gray-800 truncate block">
+                                                {selectedSystem?.assigned_user_branch || 'General'}
+                                                {#if selectedSystem?.assigned_user_year}
+                                                    • Yr {selectedSystem.assigned_user_year}
+                                                {/if}
+                                            </span>
+                                        </div>
+                                        {#if selectedSystem?.assigned_user_phone}
+                                            <div class="bg-white/80 p-2 rounded-lg border border-blue-100 col-span-2">
+                                                <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Phone / Candidate ID</span>
+                                                <span class="font-mono font-medium text-gray-800">{selectedSystem.assigned_user_phone}</span>
+                                            </div>
+                                        {/if}
+                                    </div>
+
+                                    <div class="mt-3 flex gap-2">
+                                        <button 
+                                            onclick={() => openAssignModal(selectedSystem)}
+                                            class="cursor-pointer px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-xs"
+                                        >
+                                            Change User
+                                        </button>
                                     </div>
                                 </div>
                             {:else}

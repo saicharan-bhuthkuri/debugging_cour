@@ -480,3 +480,124 @@ button.btn-primary:hover {
 .step-form {
     animation: slideUp 0.4s ease-out;
 }
+
+/* Candidate Profile Card Styles */
+.candidate-card {
+    background: rgba(0, 243, 255, 0.03);
+    border: 1px solid rgba(0, 243, 255, 0.2);
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 1.75rem;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), inset 0 0 15px rgba(0, 243, 255, 0.03);
+    backdrop-filter: blur(8px);
+    animation: fadeIn 0.4s ease-out;
+}
+
+.candidate-card-top {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 1rem;
+}
+
+.candidate-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(0, 243, 255, 0.25), rgba(188, 19, 254, 0.25));
+    border: 1.5px solid var(--primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.3rem;
+    font-family: 'JetBrains Mono', monospace;
+    box-shadow: 0 0 14px rgba(0, 243, 255, 0.3);
+    flex-shrink: 0;
+}
+
+.candidate-identity {
+    flex: 1;
+    min-width: 0;
+}
+
+.candidate-badges {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.badge-role-tag {
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
+    color: var(--primary);
+    background: rgba(0, 243, 255, 0.12);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.badge-role-sub {
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+    color: #c084fc;
+    background: rgba(188, 19, 254, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.candidate-name {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.candidate-specs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem 1rem;
+}
+
+.spec-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.spec-cell-full {
+    grid-column: span 2;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    border: 1px dashed rgba(0, 243, 255, 0.2);
+}
+
+.spec-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.8px;
+    font-weight: 500;
+}
+
+.spec-value {
+    font-size: 0.92rem;
+    color: #e2e8f0;
+    font-weight: 500;
+}
+
+.protocol-badge {
+    color: var(--primary);
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}

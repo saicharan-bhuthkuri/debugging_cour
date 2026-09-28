@@ -326,7 +326,7 @@ int main() {
             name: "Level 1 - Core C Programming",
             order: 1,
             question_ids: qIds,
-            duration: 3600
+            duration: 900
         });
         console.log("Created debug level 'Level 1 - Core C Programming' with questions:", qIds);
     } else {
@@ -334,7 +334,7 @@ int main() {
             name: levels[0].name || "Level 1 - Core C Programming",
             order: levels[0].order_num || 1,
             question_ids: qIds,
-            duration: levels[0].duration || 3600
+            duration: levels[0].duration || 900
         });
         console.log(`Updated debug level ${levels[0].id} with questions:`, qIds);
     }
